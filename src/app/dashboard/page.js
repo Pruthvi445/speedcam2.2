@@ -1,0 +1,451 @@
+'use client';
+
+import React, { useState, useEffect } from 'react';
+import { useDispatch } from 'react-redux';
+import { useRouter } from 'next/navigation';
+import { logout } from '@/store/slices/authSlice';
+import { SecureDataService } from '@/services/secureDataService';
+import { 
+  Shield, Users, Camera, AlertTriangle, CheckCircle, XCircle, 
+  Eye, EyeOff, Trash2, Activity, BarChart3, LogOut, 
+  Download, Clock, ExternalLink, Plus, Map as MapIcon, 
+  XCircle as XIcon, Globe, Zap, Flag
+} from 'lucide-react';
+
+const GOOGLE_MAPS_KEY = process.env.NEXT_PUBLIC_GOOGLE_MAPS_KEY || 'YOUR_GOOGLE_MAPS_KEY';
+
+// --- Google Maps Modal ---
+const LocationChecker = ({ lat, lng, name, onClose }) => {
+  const mapRef = React.useRef(null);
+  useEffect(() => {
+    if (!window.google) {
+      const script = document.createElement('script');
+      script.src = `https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_KEY}`;
+      script.async = true;
+      script.onload = initMap;
+      document.head.appendChild(script);
+    } else { initMap(); }
+    function initMap() {
+      if (mapRef.current && window.google) {
+        const map = new window.google.maps.Map(mapRef.current, {
+          center: { lat, lng }, zoom: 18, mapTypeId: 'satellite',
+          styles: [{ featureType: 'all', elementType: 'all', stylers: [{ invert_lightness: true }, { saturation: -100 }] }]
+        });
+        new window.google.maps.Marker({ position: { lat, lng }, map, title: name });
+      }
+    }
+  }, [lat, lng, name]);
+
+  return (
+    <div className="fixed inset-0 z-[9999] bg-black/95 backdrop-blur-xl flex items-center justify-center p-4">
+      <div className="bg-zinc-900 rounded-[2.5rem] border border-cyan-500/30 w-full max-w-4xl overflow-hidden shadow-2xl shadow-cyan-500/10">
+        <div className="flex items-center justify-between p-6 border-b border-white/5">
+          <h3 className="font-black uppercase italic tracking-tighter flex items-center gap-3 text-xl">
+            <MapIcon className="text-cyan-400 animate-pulse" size={24} /> Verification: {name}
+          </h3>
+          <button onClick={onClose} className="p-2 hover:bg-white/5 rounded-full transition-colors text-zinc-400 hover:text-white"><XIcon size={28} /></button>
+        </div>
+        <div ref={mapRef} className="h-[500px] w-full" />
+        <div className="p-6 bg-black/40 flex justify-between items-center border-t border-white/5">
+          <code className="text-cyan-400 text-sm font-mono tracking-widest">COORD_DATA: {lat}, {lng}</code>
+          <a href={`https://www.google.com/maps?q=${lat},${lng}`} target="_blank" className="bg-cyan-600 hover:bg-cyan-500 px-6 py-3 rounded-2xl text-sm font-black uppercase tracking-tighter transition-all flex items-center gap-2 shadow-lg shadow-cyan-900/20"><ExternalLink size={18} /> Deep Link Maps</a>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// --- Stat Card ---
+const StatCard = ({ icon: Icon, label, value, color }) => {
+  const colors = {
+    cyan: 'bg-cyan-500/20 border-cyan-500/30 text-cyan-400',
+    emerald: 'bg-emerald-500/20 border-emerald-500/30 text-emerald-400',
+    yellow: 'bg-yellow-500/20 border-yellow-500/30 text-yellow-400',
+    purple: 'bg-purple-500/20 border-purple-500/30 text-purple-400',
+    orange: 'bg-orange-500/20 border-orange-500/30 text-orange-400'
+  };
+  return (
+    <div className={`rounded-2xl border p-6 ${colors[color]}`}>
+      <Icon size={24} className="mb-2 opacity-80" />
+      <div className="text-3xl font-black">{value || 0}</div>
+      <div className="text-xs uppercase tracking-wider opacity-70">{label}</div>
+    </div>
+  );
+};
+
+export default function AdminDashboard() {
+  const dispatch = useDispatch();
+  const router = useRouter();
+  
+  const [pending, setPending] = useState([]);
+  const [approved, setApproved] = useState([]);
+  const [suspicious, setSuspicious] = useState([]);
+  const [reports, setReports] = useState([]);
+  const [stats, setStats] = useState({ totalUsers: 0, totalCameras: 0, pendingApprovals: 0, totalActions: 0, todayLogins: 0 });
+  const [activeTab, setActiveTab] = useState('overview');
+  const [showCoords, setShowCoords] = useState({});
+  const [logs, setLogs] = useState([]);
+  const [checkingLocation, setCheckingLocation] = useState(null);
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [newCamera, setNewCamera] = useState({ name: '', lat: '', lng: '', speedLimit: 60, type: 'speed' });
+
+  useEffect(() => {
+    console.log('🚀 [ADMIN] Dashboard mounted');
+    
+    const unsubPending = SecureDataService.getPendingCameras?.((data) => {
+      setPending(data || []);
+    }) || (() => {});
+    
+    const unsubApproved = SecureDataService.getApprovedCameras?.((data) => {
+      setApproved(data || []);
+    }) || (() => {});
+    
+    const unsubSuspicious = SecureDataService.getSuspiciousCameras?.((data) => {
+      setSuspicious(data || []);
+    }) || (() => {});
+    
+    const unsubReports = SecureDataService.getReports?.((data) => {
+      setReports(data || []);
+    }) || (() => {});
+    
+    const unsubLogs = SecureDataService.getRealtimeLogs?.((data) => {
+      setLogs(data || []);
+    }) || (() => {});
+
+    loadStats();
+
+    return () => {
+      unsubPending();
+      unsubApproved();
+      unsubSuspicious();
+      unsubReports();
+      unsubLogs();
+    };
+  }, []);
+
+  const loadStats = async () => {
+    const data = await SecureDataService.getUserStats?.() || {
+      totalUsers: 0, totalCameras: 0, pendingApprovals: 0, totalActions: 0, todayLogins: 0
+    };
+    setStats(data);
+  };
+
+  const handleLogout = () => {
+    dispatch(logout());
+    router.push('/');
+  };
+
+  const handleApprove = async (id) => {
+    await SecureDataService.approveCamera?.(id, 'admin');
+    loadStats();
+  };
+
+  const handleReject = async (id) => {
+    await SecureDataService.rejectCamera?.(id, 'Rejected by admin');
+    loadStats();
+  };
+
+  const handleDelete = async (id) => {
+    if (confirm('Are you sure? This cannot be undone.')) {
+      await SecureDataService.deleteCamera?.(id);
+      loadStats();
+    }
+  };
+
+  const handleDismissReport = async (reportId, cameraId) => {
+    if (confirm('Dismiss this report? This will remove the report and decrease the camera\'s report count by 1.')) {
+      const success = await SecureDataService.dismissReport?.(reportId, cameraId);
+      if (success) {
+        // UI will update via real-time listener
+        loadStats();
+      } else {
+        alert('Failed to dismiss report.');
+      }
+    }
+  };
+
+  const toggleCoords = async (id, isPending = true) => {
+    if (!showCoords[id]) {
+      const coords = await SecureDataService.getSecureCoords?.(id, isPending) || { lat: 0, lng: 0 };
+      setShowCoords(prev => ({ ...prev, [id]: coords }));
+      await SecureDataService.logAdminAction?.('view_coordinates', { cameraId: id });
+    } else {
+      setShowCoords(prev => ({ ...prev, [id]: null }));
+    }
+  };
+
+  const checkOnMap = (lat, lng, name) => setCheckingLocation({ lat, lng, name });
+
+  const handleAdminAddCamera = async (e) => {
+    e.preventDefault();
+    const cameraData = {
+      name: newCamera.name,
+      lat: parseFloat(newCamera.lat),
+      lng: parseFloat(newCamera.lng),
+      speedLimit: parseInt(newCamera.speedLimit),
+      type: newCamera.type
+    };
+    await SecureDataService.adminAddCamera?.(cameraData);
+    setNewCamera({ name: '', lat: '', lng: '', speedLimit: 60, type: 'speed' });
+    setShowAddForm(false);
+    loadStats();
+  };
+
+  const exportSafeData = async () => {
+    const data = await SecureDataService.exportPublicData?.() || [];
+    downloadJson(data, 'public-cameras.json');
+  };
+
+  const exportFullBackup = async () => {
+    const data = await SecureDataService.exportFullBackup?.() || {};
+    downloadJson(data, 'full-backup.json');
+  };
+
+  const downloadJson = (data, filename) => {
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${filename}-${Date.now()}.json`;
+    a.click();
+  };
+
+  const allCameras = [...approved];
+
+  // Helper to get camera name from approved list by id
+  const getCameraName = (cameraId) => {
+    const cam = approved.find(c => c.id === cameraId);
+    return cam ? cam.name : 'Unknown';
+  };
+
+  return (
+    <div className="min-h-screen bg-[#030303] text-zinc-100 p-4 md:p-8 font-sans selection:bg-cyan-500/30">
+      {checkingLocation && <LocationChecker {...checkingLocation} onClose={() => setCheckingLocation(null)} />}
+
+      <header className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-6 mb-12">
+        <div>
+          <h1 className="text-5xl font-black italic tracking-tighter uppercase group cursor-default">
+            Titan <span className="text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-600">Command</span>
+          </h1>
+          <p className="text-zinc-500 text-[10px] font-black uppercase tracking-[0.4em] flex items-center gap-2 mt-2">
+            <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" /> Kharadi_Core // Authorization: Root_Admin
+          </p>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="bg-zinc-900/50 p-1.5 rounded-2xl border border-white/5 backdrop-blur-md flex items-center gap-2">
+             <button onClick={() => setShowAddForm(true)} className="p-3 bg-cyan-600 hover:bg-cyan-500 rounded-xl transition-all text-white flex items-center gap-2 font-bold text-xs uppercase tracking-widest"><Plus size={16}/> Deploy</button>
+             <button onClick={exportSafeData} className="p-3 bg-blue-600/10 hover:bg-blue-600/20 text-blue-500 rounded-xl transition-all" title="Public Export"><Download size={18}/></button>
+             <button onClick={exportFullBackup} className="p-3 bg-purple-600/10 hover:bg-purple-600/20 text-purple-500 rounded-xl transition-all" title="Full Backup"><Download size={18}/></button>
+             <button onClick={handleLogout} className="p-3 bg-red-600/10 hover:bg-red-600/20 text-red-500 rounded-xl transition-all"><LogOut size={18}/></button>
+          </div>
+          <div className="flex flex-wrap gap-2 bg-zinc-900/50 p-1.5 rounded-2xl border border-white/5">
+             <button onClick={() => setActiveTab('overview')} className={`px-4 py-2 rounded-xl text-xs font-bold uppercase transition-all ${activeTab === 'overview' ? 'bg-zinc-100 text-black' : 'hover:bg-white/5'}`}>Home</button>
+             <button onClick={() => setActiveTab('pending')} className={`px-4 py-2 rounded-xl text-xs font-bold uppercase transition-all ${activeTab === 'pending' ? 'bg-yellow-500 text-black' : 'hover:bg-white/5'}`}>Requests ({pending.length})</button>
+             <button onClick={() => setActiveTab('cameras')} className={`px-4 py-2 rounded-xl text-xs font-bold uppercase transition-all ${activeTab === 'cameras' ? 'bg-cyan-500 text-black' : 'hover:bg-white/5'}`}>Network</button>
+             <button onClick={() => setActiveTab('suspicious')} className={`px-4 py-2 rounded-xl text-xs font-bold uppercase transition-all ${activeTab === 'suspicious' ? 'bg-red-500 text-black' : 'hover:bg-white/5'}`}>Suspicious ({suspicious.length})</button>
+             <button onClick={() => setActiveTab('reports')} className={`px-4 py-2 rounded-xl text-xs font-bold uppercase transition-all ${activeTab === 'reports' ? 'bg-orange-500 text-black' : 'hover:bg-white/5'}`}>Reports ({reports.length})</button>
+             <button onClick={() => setActiveTab('users')} className={`px-4 py-2 rounded-xl text-xs font-bold uppercase transition-all ${activeTab === 'users' ? 'bg-purple-500 text-black' : 'hover:bg-white/5'}`}>Users</button>
+             <button onClick={() => setActiveTab('logs')} className={`px-4 py-2 rounded-xl text-xs font-bold uppercase transition-all ${activeTab === 'logs' ? 'bg-orange-500 text-black' : 'hover:bg-white/5'}`}>Logs</button>
+          </div>
+        </div>
+      </header>
+
+      {/* Bento Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-4 lg:grid-cols-6 gap-4 auto-rows-[160px]">
+        {activeTab === 'overview' && (
+          <>
+            <div className="md:col-span-2 lg:col-span-3 row-span-2 relative group overflow-hidden rounded-[2.5rem] bg-zinc-900/30 border border-white/5 p-8">
+              <div className="absolute top-0 right-0 w-80 h-80 bg-cyan-500/10 blur-[100px] -mr-32 -mt-32" />
+              <div className="relative z-10 h-full flex flex-col justify-between">
+                <Globe className="text-cyan-400 mb-4" size={32} />
+                <div>
+                  <h2 className="text-7xl font-black tracking-tighter mb-2 italic">{stats.totalCameras}</h2>
+                  <p className="text-zinc-500 font-bold uppercase tracking-[0.2em] text-xs">Total Registered Nodes</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="md:col-span-2 lg:col-span-1 row-span-1 rounded-[2rem] bg-zinc-900/30 border border-white/5 p-6 flex flex-col justify-between">
+              <Users className="text-zinc-400" size={24} />
+              <div className="text-2xl font-black italic">{stats.totalUsers} <span className="text-[10px] text-zinc-500 block uppercase">Users</span></div>
+            </div>
+
+            <div className="md:col-span-2 lg:col-span-1 row-span-1 rounded-[2rem] bg-zinc-900/30 border border-white/5 p-6 flex flex-col justify-between">
+              <AlertTriangle className="text-yellow-400" size={24} />
+              <div className="text-2xl font-black italic">{stats.pendingApprovals} <span className="text-[10px] text-zinc-500 block uppercase">Pending</span></div>
+            </div>
+
+            <div className="md:col-span-2 lg:col-span-1 row-span-1 rounded-[2rem] bg-zinc-900/30 border border-white/5 p-6 flex flex-col justify-between">
+              <Activity className="text-purple-400" size={24} />
+              <div className="text-2xl font-black italic">{stats.totalActions} <span className="text-[10px] text-zinc-500 block uppercase">Actions</span></div>
+            </div>
+
+            <div className="md:col-span-2 lg:col-span-1 row-span-1 rounded-[2rem] bg-zinc-900/30 border border-white/5 p-6 flex flex-col justify-between">
+              <Clock className="text-orange-400" size={24} />
+              <div className="text-2xl font-black italic">{stats.todayLogins} <span className="text-[10px] text-zinc-500 block uppercase">Today</span></div>
+            </div>
+
+            <div className="md:col-span-2 lg:col-span-2 row-span-2 rounded-[2.5rem] bg-gradient-to-br from-cyan-600 to-blue-700 p-8 shadow-2xl shadow-blue-500/20">
+               <div className="h-full flex flex-col justify-between">
+                  <Zap size={32} />
+                  <div>
+                    <h3 className="text-3xl font-black tracking-tighter uppercase leading-none mb-2">System<br/>Pulse</h3>
+                    <div className="flex gap-1">
+                      {[1,2,3,4,5,6].map(i => <div key={i} className="h-1 flex-1 bg-white/20 rounded-full overflow-hidden"><div className="h-full bg-white animate-pulse" style={{animationDelay: `${i*100}ms`}} /></div>)}
+                    </div>
+                  </div>
+               </div>
+            </div>
+          </>
+        )}
+
+        {activeTab !== 'overview' && (
+          <div className="col-span-full row-span-4 rounded-[2.5rem] bg-zinc-900/20 border border-white/5 p-6 backdrop-blur-sm overflow-hidden flex flex-col">
+            <div className="flex items-center justify-between mb-8 px-4">
+              <h3 className="text-xl font-black uppercase italic tracking-tighter text-cyan-400 flex items-center gap-3">
+                {activeTab === 'pending' && <><AlertTriangle className="text-yellow-500" /> Incoming Requests</>}
+                {activeTab === 'cameras' && <><Camera /> Camera Network</>}
+                {activeTab === 'suspicious' && <><AlertTriangle className="text-red-500" /> Suspicious Cameras</>}
+                {activeTab === 'reports' && <><Flag className="text-orange-500" /> User Reports</>}
+                {activeTab === 'users' && <><Users /> User Activity</>}
+                {activeTab === 'logs' && <><Activity /> System Logs</>}
+              </h3>
+              <div className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest">Live Updates Enabled</div>
+            </div>
+
+            <div className="overflow-y-auto space-y-3 pr-2 custom-scrollbar flex-1">
+              {activeTab === 'pending' && pending.map(item => renderListItem(item, 'pending'))}
+              {activeTab === 'cameras' && allCameras.map(item => renderListItem(item, 'cameras'))}
+              {activeTab === 'suspicious' && suspicious.map(item => renderListItem(item, 'suspicious'))}
+              {activeTab === 'reports' && reports.map(item => renderReportItem(item))}
+              {activeTab === 'users' && (
+                <div className="text-center py-12 text-zinc-500 bg-black/20 rounded-xl">User activity logs will appear here.</div>
+              )}
+              {activeTab === 'logs' && (
+                <div className="text-center py-12 text-zinc-500 bg-black/20 rounded-xl">Real‑time logs will appear here.</div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ADD CAMERA FORM MODAL */}
+      {showAddForm && (
+        <div className="fixed inset-0 z-[9998] bg-black/90 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-zinc-900 rounded-[3rem] border border-white/10 w-full max-w-md p-10 relative overflow-hidden shadow-2xl">
+            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-cyan-500 to-blue-600" />
+            <h3 className="text-3xl font-black uppercase italic tracking-tighter mb-8 text-center">New <span className="text-cyan-400">Deployment</span></h3>
+            <form onSubmit={handleAdminAddCamera} className="space-y-4">
+               <input placeholder="ASSET_NAME" className="w-full bg-black/40 border border-white/5 rounded-2xl p-4 outline-none focus:border-cyan-500/50 transition-all font-bold tracking-widest text-sm" value={newCamera.name} onChange={e => setNewCamera({...newCamera, name: e.target.value})} required />
+               <div className="grid grid-cols-2 gap-4">
+                 <input type="number" step="0.000001" placeholder="LATITUDE" className="bg-black/40 border border-white/5 rounded-2xl p-4 outline-none focus:border-cyan-500/50 transition-all text-xs font-mono" value={newCamera.lat} onChange={e => setNewCamera({...newCamera, lat: e.target.value})} required />
+                 <input type="number" step="0.000001" placeholder="LONGITUDE" className="bg-black/40 border border-white/5 rounded-2xl p-4 outline-none focus:border-cyan-500/50 transition-all text-xs font-mono" value={newCamera.lng} onChange={e => setNewCamera({...newCamera, lng: e.target.value})} required />
+               </div>
+               <select className="w-full bg-black/40 border border-white/5 rounded-2xl p-4 outline-none focus:border-cyan-500/50 transition-all text-sm" value={newCamera.speedLimit} onChange={e => setNewCamera({...newCamera, speedLimit: e.target.value})}>
+                 {[30,40,50,60,80,100,120].map(s => <option key={s} value={s}>{s} km/h</option>)}
+               </select>
+               <select className="w-full bg-black/40 border border-white/5 rounded-2xl p-4 outline-none focus:border-cyan-500/50 transition-all text-sm" value={newCamera.type} onChange={e => setNewCamera({...newCamera, type: e.target.value})}>
+                 <option value="speed">Speed Camera</option>
+                 <option value="red">Red Light Camera</option>
+               </select>
+               <button type="submit" className="w-full bg-zinc-100 text-black py-5 rounded-[1.5rem] font-black uppercase tracking-tighter text-lg hover:scale-[1.02] active:scale-95 transition-all shadow-xl shadow-cyan-500/10">Initiate Asset Upload</button>
+               <button type="button" onClick={() => setShowAddForm(false)} className="w-full text-zinc-500 font-bold uppercase text-[10px] tracking-[0.3em] mt-4">Abort Mission</button>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
+  function renderListItem(item, type) {
+    const isPending = type === 'pending';
+    const isSuspicious = type === 'suspicious';
+    const showActions = isPending || type === 'cameras' || isSuspicious;
+    return (
+      <div key={item.id} className="group bg-white/[0.02] hover:bg-white/[0.05] border border-white/5 rounded-[1.5rem] p-5 transition-all flex items-center justify-between">
+        <div className="flex items-center gap-5">
+           <div className={`p-4 rounded-2xl ${isPending ? 'bg-yellow-500/10 text-yellow-500' : isSuspicious ? 'bg-red-500/10 text-red-500' : 'bg-cyan-500/10 text-cyan-500'}`}>
+              <Camera size={24} />
+           </div>
+           <div>
+              <h4 className="font-black uppercase tracking-tight text-lg">{item.name}</h4>
+              <div className="flex items-center gap-3 mt-1">
+                <span className="text-[10px] font-black px-2 py-0.5 bg-white/5 rounded text-zinc-400 uppercase tracking-tighter">{item.speedLimit} KM/H</span>
+                <span className="text-[10px] font-black px-2 py-0.5 bg-white/5 rounded text-zinc-400 uppercase tracking-tighter">{item.type === 'red' ? '🔴 RED' : '⚡ SPEED'}</span>
+                {showCoords[item.id] ? (
+                  <span className="text-[10px] font-mono text-cyan-500">📍 {showCoords[item.id].lat.toFixed(4)}, {showCoords[item.id].lng.toFixed(4)}</span>
+                ) : (
+                  <span className="text-[10px] text-zinc-600 font-mono tracking-widest uppercase">[Encrypted_Link]</span>
+                )}
+                {isSuspicious && <span className="text-red-400 text-[10px] font-bold">Reports: {item.reports}</span>}
+              </div>
+           </div>
+        </div>
+
+        {showActions && (
+          <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+            <button onClick={() => toggleCoords(item.id, isPending)} className="p-3 bg-zinc-800 rounded-xl hover:text-cyan-400 transition-colors">
+              {showCoords[item.id] ? <EyeOff size={18}/> : <Eye size={18}/>}
+            </button>
+            {isPending && (
+              <>
+                <button onClick={() => handleApprove(item.id)} className="p-3 bg-emerald-500/10 text-emerald-500 rounded-xl hover:bg-emerald-500 hover:text-white transition-all"><CheckCircle size={18}/></button>
+                <button onClick={() => handleReject(item.id)} className="p-3 bg-red-500/10 text-red-500 rounded-xl hover:bg-red-500 hover:text-white transition-all"><XCircle size={18}/></button>
+              </>
+            )}
+            {(type === 'cameras' || isSuspicious) && (
+              <button onClick={() => handleDelete(item.id)} className="p-3 bg-red-500/10 text-red-500 rounded-xl hover:bg-red-500 hover:text-white transition-all"><Trash2 size={18}/></button>
+            )}
+            {showCoords[item.id] && (
+              <button onClick={() => setCheckingLocation({lat: showCoords[item.id].lat, lng: showCoords[item.id].lng, name: item.name})} className="p-3 bg-blue-600 rounded-xl"><MapIcon size={18}/></button>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  function renderReportItem(report) {
+    return (
+      <div key={report.id} className="group bg-white/[0.02] hover:bg-white/[0.05] border border-white/5 rounded-[1.5rem] p-5 transition-all flex items-center justify-between">
+        <div className="flex items-center gap-5">
+          <div className="p-4 rounded-2xl bg-orange-500/10 text-orange-500">
+            <Flag size={24} />
+          </div>
+          <div>
+            <h4 className="font-black uppercase tracking-tight text-lg">{report.cameraName || getCameraName(report.cameraId)}</h4>
+            <div className="flex items-center gap-3 mt-1">
+              <span className="text-[10px] font-black px-2 py-0.5 bg-white/5 rounded text-zinc-400 uppercase tracking-tighter">User: {report.userId?.substring(0,8)}...</span>
+              <span className="text-[10px] font-black px-2 py-0.5 bg-white/5 rounded text-zinc-400 uppercase tracking-tighter">
+                {new Date(report.timestamp).toLocaleString()}
+              </span>
+              {report.reason && (
+                <span className="text-[10px] text-orange-400 max-w-xs truncate" title={report.reason}>
+                  Reason: {report.reason}
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+          <button 
+            onClick={() => handleDismissReport(report.id, report.cameraId)} 
+            className="p-3 bg-emerald-500/10 text-emerald-500 rounded-xl hover:bg-emerald-500 hover:text-white transition-all"
+            title="Dismiss Report (decrease camera report count)"
+          >
+            <CheckCircle size={18}/>
+          </button>
+          <button 
+            onClick={() => handleDelete(report.cameraId)} 
+            className="p-3 bg-red-500/10 text-red-500 rounded-xl hover:bg-red-500 hover:text-white transition-all"
+            title="Delete Camera"
+          >
+            <Trash2 size={18}/>
+          </button>
+        </div>
+      </div>
+    );
+  }
+}

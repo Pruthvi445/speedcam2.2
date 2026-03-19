@@ -1,0 +1,231 @@
+'use client';
+
+import React, { useState, useEffect } from 'react';
+import { useDispatch } from 'react-redux';
+import { useRouter } from 'next/navigation';
+import { logout } from '@/store/slices/authSlice';
+import { SecureDataService } from '@/services/secureDataService';
+import { 
+  Shield, Users, Camera, AlertTriangle, CheckCircle, XCircle, 
+  Eye, EyeOff, Trash2, Activity, BarChart3, LogOut, 
+  Download, Clock, ExternalLink, Plus, Map as MapIcon, 
+  XCircle as XIcon, Search, Bell, Globe, Zap
+} from 'lucide-react';
+
+// --- GOOGLE MAP MODAL ---
+const LocationChecker = ({ lat, lng, name, onClose }) => {
+  const mapRef = React.useRef(null);
+  useEffect(() => {
+    if (!window.google) {
+      const script = document.createElement('script');
+      script.src = `https://maps.googleapis.com/maps/api/js?key=YOUR_GOOGLE_MAPS_KEY`;
+      script.async = true;
+      script.onload = initMap;
+      document.head.appendChild(script);
+    } else { initMap(); }
+    function initMap() {
+      if (mapRef.current && window.google) {
+        const map = new window.google.maps.Map(mapRef.current, {
+          center: { lat, lng }, zoom: 18, mapTypeId: 'satellite',
+          styles: [{ featureType: 'all', elementType: 'all', stylers: [{ invert_lightness: true }, { saturation: -100 }] }]
+        });
+        new window.google.maps.Marker({ position: { lat, lng }, map, title: name });
+      }
+    }
+  }, [lat, lng, name]);
+
+  return (
+    <div className="fixed inset-0 z-[9999] bg-black/95 backdrop-blur-xl flex items-center justify-center p-4">
+      <div className="bg-zinc-900 rounded-[2.5rem] border border-cyan-500/30 w-full max-w-4xl overflow-hidden shadow-2xl shadow-cyan-500/10">
+        <div className="flex items-center justify-between p-6 border-b border-white/5">
+          <h3 className="font-black uppercase italic tracking-tighter flex items-center gap-3 text-xl">
+            <MapIcon className="text-cyan-400 animate-pulse" size={24} /> Verification: {name}
+          </h3>
+          <button onClick={onClose} className="p-2 hover:bg-white/5 rounded-full transition-colors text-zinc-400 hover:text-white"><XIcon size={28} /></button>
+        </div>
+        <div ref={mapRef} className="h-[500px] w-full" />
+        <div className="p-6 bg-black/40 flex justify-between items-center border-t border-white/5">
+          <code className="text-cyan-400 text-sm font-mono tracking-widest">COORD_DATA: {lat}, {lng}</code>
+          <a href={`https://www.google.com/maps?q=${lat},${lng}`} target="_blank" className="bg-cyan-600 hover:bg-cyan-500 px-6 py-3 rounded-2xl text-sm font-black uppercase tracking-tighter transition-all flex items-center gap-2 shadow-lg shadow-cyan-900/20"><ExternalLink size={18} /> Deep Link Maps</a>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default function TitanDashboard() {
+  const dispatch = useDispatch();
+  const router = useRouter();
+  
+  // States from your original logic
+  const [pending, setPending] = useState([]);
+  const [approved, setApproved] = useState([]);
+  const [suspicious, setSuspicious] = useState([]);
+  const [stats, setStats] = useState({ totalUsers: 0, totalCameras: 0, pendingApprovals: 0, totalActions: 0, todayLogins: 0 });
+  const [activeTab, setActiveTab] = useState('overview');
+  const [showCoords, setShowCoords] = useState({});
+  const [checkingLocation, setCheckingLocation] = useState(null);
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [newCamera, setNewCamera] = useState({ name: '', lat: '', lng: '', speedLimit: 60 });
+
+  useEffect(() => {
+    const unsubPending = SecureDataService.getPendingCameras?.(data => setPending(data || [])) || (() => {});
+    const unsubApproved = SecureDataService.getApprovedCameras?.(data => setApproved(data || [])) || (() => {});
+    const unsubSuspicious = SecureDataService.getSuspiciousCameras?.(data => setSuspicious(data || [])) || (() => {});
+    loadStats();
+    return () => { unsubPending(); unsubApproved(); unsubSuspicious(); };
+  }, []);
+
+  const loadStats = async () => {
+    const data = await SecureDataService.getUserStats?.();
+    if (data) setStats(data);
+  };
+
+  const handleLogout = () => { dispatch(logout()); router.push('/'); };
+
+  const toggleCoords = async (id, isPending = true) => {
+    if (!showCoords[id]) {
+      const coords = await SecureDataService.getSecureCoords?.(id, isPending) || { lat: 0, lng: 0 };
+      setShowCoords(prev => ({ ...prev, [id]: coords }));
+    } else {
+      setShowCoords(prev => ({ ...prev, [id]: null }));
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-[#030303] text-zinc-100 p-4 md:p-8 font-sans selection:bg-cyan-500/30">
+      {checkingLocation && <LocationChecker {...checkingLocation} onClose={() => setCheckingLocation(null)} />}
+
+      {/* --- HEADER --- */}
+      <header className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-6 mb-12">
+        <div>
+          <h1 className="text-5xl font-black italic tracking-tighter uppercase group cursor-default">
+            Titan <span className="text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-600">Command</span>
+          </h1>
+          <p className="text-zinc-500 text-[10px] font-black uppercase tracking-[0.4em] flex items-center gap-2 mt-2">
+            <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" /> Kharadi_Core // Authorization: Root_Admin
+          </p>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="bg-zinc-900/50 p-1.5 rounded-2xl border border-white/5 backdrop-blur-md flex items-center gap-2">
+             <button onClick={() => setShowAddForm(true)} className="p-3 bg-cyan-600 hover:bg-cyan-500 rounded-xl transition-all text-white flex items-center gap-2 font-bold text-xs uppercase tracking-widest"><Plus size={16}/> Deploy</button>
+             <button onClick={handleLogout} className="p-3 bg-red-600/10 hover:bg-red-600/20 text-red-500 rounded-xl transition-all"><LogOut size={18}/></button>
+          </div>
+          <div className="flex gap-2 bg-zinc-900/50 p-1.5 rounded-2xl border border-white/5">
+             <button onClick={() => setActiveTab('overview')} className={`px-4 py-2 rounded-xl text-xs font-bold uppercase transition-all ${activeTab === 'overview' ? 'bg-zinc-100 text-black' : 'hover:bg-white/5'}`}>Home</button>
+             <button onClick={() => setActiveTab('pending')} className={`px-4 py-2 rounded-xl text-xs font-bold uppercase transition-all ${activeTab === 'pending' ? 'bg-yellow-500 text-black' : 'hover:bg-white/5'}`}>Requests ({pending.length})</button>
+             <button onClick={() => setActiveTab('cameras')} className={`px-4 py-2 rounded-xl text-xs font-bold uppercase transition-all ${activeTab === 'cameras' ? 'bg-cyan-500 text-black' : 'hover:bg-white/5'}`}>Network</button>
+          </div>
+        </div>
+      </header>
+
+      {/* --- BENTO GRID SYSTEM --- */}
+      <div className="grid grid-cols-1 md:grid-cols-4 lg:grid-cols-6 gap-4 auto-rows-[160px]">
+        
+        {/* LARGE DATA MONITOR (Overview Only) */}
+        {activeTab === 'overview' && (
+          <>
+            <div className="md:col-span-2 lg:col-span-3 row-span-2 relative group overflow-hidden rounded-[2.5rem] bg-zinc-900/30 border border-white/5 p-8">
+              <div className="absolute top-0 right-0 w-80 h-80 bg-cyan-500/10 blur-[100px] -mr-32 -mt-32" />
+              <div className="relative z-10 h-full flex flex-col justify-between">
+                <Globe className="text-cyan-400 mb-4" size={32} />
+                <div>
+                  <h2 className="text-7xl font-black tracking-tighter mb-2 italic">{stats.totalCameras}</h2>
+                  <p className="text-zinc-500 font-bold uppercase tracking-[0.2em] text-xs">Total Registered Nodes</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="md:col-span-2 lg:col-span-1 row-span-1 rounded-[2rem] bg-zinc-900/30 border border-white/5 p-6 flex flex-col justify-between">
+              <Users className="text-zinc-400" size={24} />
+              <div className="text-2xl font-black italic">{stats.totalUsers} <span className="text-[10px] text-zinc-500 block uppercase">Users</span></div>
+            </div>
+
+            <div className="md:col-span-2 lg:col-span-2 row-span-2 rounded-[2.5rem] bg-gradient-to-br from-cyan-600 to-blue-700 p-8 shadow-2xl shadow-blue-500/20">
+               <div className="h-full flex flex-col justify-between">
+                  <Zap size={32} />
+                  <div>
+                    <h3 className="text-3xl font-black tracking-tighter uppercase leading-none mb-2">System<br/>Pulse</h3>
+                    <div className="flex gap-1">
+                      {[1,2,3,4,5,6].map(i => <div key={i} className="h-1 flex-1 bg-white/20 rounded-full overflow-hidden"><div className="h-full bg-white animate-pulse" style={{animationDelay: `${i*100}ms`}} /></div>)}
+                    </div>
+                  </div>
+               </div>
+            </div>
+          </>
+        )}
+
+        {/* --- DYNAMIC TAB CONTENT (LISTS) --- */}
+        <div className={`col-span-full ${activeTab === 'overview' ? 'lg:col-span-4 row-span-2' : 'row-span-4'} rounded-[2.5rem] bg-zinc-900/20 border border-white/5 p-6 backdrop-blur-sm overflow-hidden flex flex-col`}>
+          <div className="flex items-center justify-between mb-8 px-4">
+            <h3 className="text-xl font-black uppercase italic tracking-tighter text-cyan-400 flex items-center gap-3">
+              {activeTab === 'pending' && <><AlertTriangle className="text-yellow-500" /> Incoming Requests</>}
+              {activeTab === 'cameras' && <><Camera /> Camera Network</>}
+              {activeTab === 'overview' && <><Activity /> Recent Data</>}
+            </h3>
+            <div className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest">Live Updates Enabled</div>
+          </div>
+
+          <div className="overflow-y-auto space-y-3 pr-2 custom-scrollbar flex-1">
+            {(activeTab === 'pending' ? pending : activeTab === 'cameras' ? approved : suspicious).map(item => (
+              <div key={item.id} className="group bg-white/[0.02] hover:bg-white/[0.05] border border-white/5 rounded-[1.5rem] p-5 transition-all flex items-center justify-between">
+                <div className="flex items-center gap-5">
+                   <div className={`p-4 rounded-2xl ${activeTab === 'pending' ? 'bg-yellow-500/10 text-yellow-500' : 'bg-cyan-500/10 text-cyan-500'}`}>
+                      <Camera size={24} />
+                   </div>
+                   <div>
+                      <h4 className="font-black uppercase tracking-tight text-lg">{item.name}</h4>
+                      <div className="flex items-center gap-3 mt-1">
+                        <span className="text-[10px] font-black px-2 py-0.5 bg-white/5 rounded text-zinc-400 uppercase tracking-tighter">{item.speedLimit} KM/H</span>
+                        {showCoords[item.id] ? (
+                          <span className="text-[10px] font-mono text-cyan-500">📍 {showCoords[item.id].lat.toFixed(4)}, {showCoords[item.id].lng.toFixed(4)}</span>
+                        ) : (
+                          <span className="text-[10px] text-zinc-600 font-mono tracking-widest uppercase">[Encrypted_Link]</span>
+                        )}
+                      </div>
+                   </div>
+                </div>
+
+                <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button onClick={() => toggleCoords(item.id, activeTab === 'pending')} className="p-3 bg-zinc-800 rounded-xl hover:text-cyan-400 transition-colors">
+                    {showCoords[item.id] ? <EyeOff size={18}/> : <Eye size={18}/>}
+                  </button>
+                  {activeTab === 'pending' && (
+                    <>
+                      <button onClick={() => SecureDataService.approveCamera(item.id)} className="p-3 bg-emerald-500/10 text-emerald-500 rounded-xl hover:bg-emerald-500 hover:text-white transition-all"><CheckCircle size={18}/></button>
+                      <button onClick={() => SecureDataService.rejectCamera(item.id)} className="p-3 bg-red-500/10 text-red-500 rounded-xl hover:bg-red-500 hover:text-white transition-all"><XCircle size={18}/></button>
+                    </>
+                  )}
+                  {showCoords[item.id] && (
+                    <button onClick={() => setCheckingLocation({lat: showCoords[item.id].lat, lng: showCoords[item.id].lng, name: item.name})} className="p-3 bg-blue-600 rounded-xl"><MapIcon size={18}/></button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+      </div>
+
+      {/* --- ADD CAMERA FORM MODAL --- */}
+      {showAddForm && (
+        <div className="fixed inset-0 z-[9998] bg-black/90 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-zinc-900 rounded-[3rem] border border-white/10 w-full max-w-md p-10 relative overflow-hidden shadow-2xl">
+            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-cyan-500 to-blue-600" />
+            <h3 className="text-3xl font-black uppercase italic tracking-tighter mb-8 text-center">New <span className="text-cyan-400">Deployment</span></h3>
+            <div className="space-y-4">
+               <input placeholder="ASSET_NAME" className="w-full bg-black/40 border border-white/5 rounded-2xl p-4 outline-none focus:border-cyan-500/50 transition-all font-bold tracking-widest text-sm" value={newCamera.name} onChange={e => setNewCamera({...newCamera, name: e.target.value})} />
+               <div className="grid grid-cols-2 gap-4">
+                 <input placeholder="LATITUDE" className="bg-black/40 border border-white/5 rounded-2xl p-4 outline-none focus:border-cyan-500/50 transition-all text-xs font-mono" value={newCamera.lat} onChange={e => setNewCamera({...newCamera, lat: e.target.value})} />
+                 <input placeholder="LONGITUDE" className="bg-black/40 border border-white/5 rounded-2xl p-4 outline-none focus:border-cyan-500/50 transition-all text-xs font-mono" value={newCamera.lng} onChange={e => setNewCamera({...newCamera, lng: e.target.value})} />
+               </div>
+               <button onClick={() => SecureDataService.adminAddCamera(newCamera)} className="w-full bg-zinc-100 text-black py-5 rounded-[1.5rem] font-black uppercase tracking-tighter text-lg hover:scale-[1.02] active:scale-95 transition-all shadow-xl shadow-cyan-500/10">Initiate Asset Upload</button>
+               <button onClick={() => setShowAddForm(false)} className="w-full text-zinc-500 font-bold uppercase text-[10px] tracking-[0.3em] mt-4">Abort Mission</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

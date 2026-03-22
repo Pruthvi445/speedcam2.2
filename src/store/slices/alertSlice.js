@@ -15,9 +15,11 @@ const alertSlice = createSlice({
     clearAlert: (state, action) => {
       state.alerts = state.alerts.filter(a => a.id !== action.payload);
     },
-    loadHistory: (state) => {},
+    loadHistory: (state) => {
+      // This can be used to load from localStorage if needed
+    },
   },
 });
 
 export const { addAlert, clearAlert, loadHistory } = alertSlice.actions;
-export default alertSlice.reducer;  
+export default alertSlice.reducer;

@@ -3,11 +3,11 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useDispatch } from 'react-redux';
-import { auth, signInWithEmailAndPassword, createUserWithEmailAndPassword } from '@/lib/firebase';
+import { auth, createUserWithEmailAndPassword, signInWithEmailAndPassword, sendEmailVerification } from '@/lib/firebase';
 import { setUser } from '@/store/slices/authSlice';
 import { dbPush } from '@/lib/firebase';
 import Link from 'next/link';
-import { Shield, Mail, Lock, User } from 'lucide-react';
+import { Shield, Mail, Lock, User, ArrowLeft } from 'lucide-react';
 
 export default function AuthPage() {
   const [isLogin, setIsLogin] = useState(true);
@@ -15,36 +15,54 @@ export default function AuthPage() {
   const [password, setPassword] = useState('');
   const [username, setUsername] = useState('');
   const [error, setError] = useState('');
+  const [passwordError, setPasswordError] = useState('');
   const router = useRouter();
   const dispatch = useDispatch();
+
+  const validatePassword = (pwd) => {
+    const strongRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/;
+    return strongRegex.test(pwd);
+  };
+
+  const getFriendlyError = (code) => {
+    const map = {
+      'auth/email-already-in-use': 'This email is already registered.',
+      'auth/invalid-email': 'Invalid email address.',
+      'auth/weak-password': 'Password is too weak.',
+      'auth/user-not-found': 'No account found with this email.',
+      'auth/wrong-password': 'Incorrect password.',
+    };
+    return map[code] || code;
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
+    setPasswordError('');
+
+    if (!isLogin && !validatePassword(password)) {
+      setPasswordError('Password must be at least 8 chars, include uppercase, lowercase, number, and special character.');
+      return;
+    }
 
     try {
       if (isLogin) {
-        // Login
         const userCredential = await signInWithEmailAndPassword(auth, email, password);
-        const user = userCredential.user;
-        // The auth listener in Providers will fetch profile and dispatch setUser
         router.push('/map');
       } else {
-        // Sign up
         const userCredential = await createUserWithEmailAndPassword(auth, email, password);
         const user = userCredential.user;
-        // Save username in Realtime Database
+        await sendEmailVerification(user);
         await dbPush(`users/${user.uid}/profile`, {
           username,
           email: user.email,
           createdAt: Date.now(),
         });
-        // Dispatch user with username
         dispatch(setUser({ uid: user.uid, email: user.email, username }));
         router.push('/map');
       }
     } catch (err) {
-      setError(err.message);
+      setError(getFriendlyError(err.code));
     }
   };
 
@@ -88,13 +106,26 @@ export default function AuthPage() {
               type="password"
               placeholder="Password"
               value={password}
-              onChange={(e) => setPassword(e.target.value)}
+              onChange={(e) => {
+                setPassword(e.target.value);
+                if (!isLogin && e.target.value && !validatePassword(e.target.value)) {
+                  setPasswordError('Password must be at least 8 chars, include uppercase, lowercase, number, and special character.');
+                } else {
+                  setPasswordError('');
+                }
+              }}
               className="w-full bg-black/50 border border-white/10 rounded-xl py-3 pl-12 pr-4 outline-none focus:border-cyan-500"
               required
             />
           </div>
-
+          {passwordError && <p className="text-red-500 text-sm">{passwordError}</p>}
           {error && <p className="text-red-500 text-sm">{error}</p>}
+
+          {isLogin && (
+            <Link href="/auth/reset" className="block text-center text-sm text-cyan-400 hover:underline mt-2">
+              Forgot password?
+            </Link>
+          )}
 
           <button
             type="submit"

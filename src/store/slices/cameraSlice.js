@@ -1,23 +1,26 @@
 import { createSlice } from '@reduxjs/toolkit';
 
 const initialState = {
-  allCameras: [],          // all approved cameras from Firebase
-  relevantCameras: [],      // cameras within 3km, not passed, sorted by distance
-  crossedCount: 0,          // number of cameras passed during current session
-  tripDistance: 0,          // total distance traveled in meters
-  overspeedAlert: false,    // whether overspeed alert is active
+  allCameras: [],
+  speedCameras: [],
+  redLightCameras: [],
+  relevantCameras: [],
+  crossedCount: 0,
+  tripDistance: 0,
+  overspeedAlert: false,
 };
 
 const cameraSlice = createSlice({
   name: 'camera',
   initialState,
   reducers: {
-    // Set all cameras from Firebase
     setAllCameras: (state, action) => {
-      state.allCameras = action.payload;
+      const valid = (action.payload || []).filter(c => c && c.lat !== undefined && c.lng !== undefined);
+      state.allCameras = valid;
+      state.speedCameras = valid.filter(c => c.type === 'speed' || c.type === undefined);
+      state.redLightCameras = valid.filter(c => c.type === 'red' || c.type === 'redlight');
     },
 
-    // Update relevant cameras list (called from GPS effect)
     setRelevant: (state, action) => {
       const { cameras } = action.payload;
       state.relevantCameras = cameras;
@@ -25,12 +28,24 @@ const cameraSlice = createSlice({
 
     // Update camera logic based on current location and speed
     updateCameraLogic: (state, action) => {
-      const { currentLoc, currentSpeed, allCameras, getDist } = action.payload;
+      const { currentLoc, currentSpeed, allCameras } = action.payload;
       
+      const getDistHelper = (lat1, lon1, lat2, lon2) => {
+        const R = 6371e3;
+        const φ1 = lat1 * Math.PI / 180;
+        const φ2 = lat2 * Math.PI / 180;
+        const Δφ = (lat2 - lat1) * Math.PI / 180;
+        const Δλ = (lon2 - lon1) * Math.PI / 180;
+        const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+                  Math.cos(φ1) * Math.cos(φ2) *
+                  Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+        return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      };
+
       // Calculate distance for each camera
-      const withDist = allCameras.map(cam => ({
+      const withDist = (allCameras || []).map(cam => ({
         ...cam,
-        distance: getDist(currentLoc[0], currentLoc[1], cam.lat, cam.lng)
+        distance: getDistHelper(currentLoc[0], currentLoc[1], cam.lat, cam.lng)
       }));
 
       // Filter cameras within 3km that are not passed

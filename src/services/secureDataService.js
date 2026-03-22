@@ -14,14 +14,21 @@ export const SecureDataService = {
     }
   },
 
-  // Submit camera request
-  submitCameraRequest: async (cameraData, userId) => {
+  // Submit camera request - accepts user object with uid, username, email
+  submitCameraRequest: async (cameraData, user) => {
+    console.log('📝 Submitting camera by user:', user);
     try {
+      if (!user?.uid) {
+        console.error('❌ No user UID');
+        throw new Error('User not authenticated');
+      }
       const encryptedLat = btoa(cameraData.lat.toString());
       const encryptedLng = btoa(cameraData.lng.toString());
 
       const submission = {
-        userId,
+        userId: user.uid,
+        userName: user.username || 'Anonymous',
+        userEmail: user.email || '',
         name: cameraData.name || `Camera-${Date.now()}`,
         speedLimit: cameraData.speedLimit,
         type: cameraData.type || 'speed',
@@ -33,43 +40,44 @@ export const SecureDataService = {
 
       const key = await dbPush('cameras/pending', submission);
       await dbUpdate(`cameras/pending/${key}`, { id: key });
-      await SecureDataService.trackUserActivity(userId, { type: 'submit_camera', cameraId: key });
+      await SecureDataService.trackUserActivity(user.uid, { type: 'submit_camera', cameraId: key });
+      console.log('✅ Camera submitted successfully, key:', key);
       return key;
     } catch (e) {
-      console.error('Submit error:', e);
+      console.error('❌ Submit error:', e);
       throw e;
     }
   },
 
-  // Get pending cameras
+  // Get pending cameras (real-time)
   getPendingCameras: (callback) => {
     return dbOnValue('cameras/pending', (data) => {
       if (!data) return callback([]);
-      const list = Object.entries(data).map(([id, val]) => ({ id, ...val }));
+      const list = Object.entries(data).map(([id, val]) => ({ ...val, id }));
       callback(list);
     });
   },
 
-  // Get approved cameras
+  // Get approved cameras (real-time)
   getApprovedCameras: (callback) => {
     return dbOnValue('cameras/approved', (data) => {
       if (!data) return callback([]);
       const list = Object.entries(data).map(([id, val]) => ({
-        id,
         ...val,
+        id,
         isSuspicious: (val.reports || 0) >= 5
       }));
       callback(list);
     });
   },
 
-  // Get suspicious cameras
+  // Get suspicious cameras (real-time)
   getSuspiciousCameras: (callback) => {
     return dbOnValue('cameras/approved', (data) => {
       if (!data) return callback([]);
       const list = Object.entries(data)
         .filter(([_, val]) => (val.reports || 0) >= 5)
-        .map(([id, val]) => ({ id, ...val }));
+        .map(([id, val]) => ({ ...val, id }));
       callback(list);
     });
   },
@@ -79,8 +87,8 @@ export const SecureDataService = {
     return dbOnValue('cameras/reports', (data) => {
       if (!data) return callback([]);
       const list = Object.entries(data).map(([id, val]) => ({
-        id,
-        ...val
+        ...val,
+        id
       }));
       callback(list);
     });
@@ -109,23 +117,44 @@ export const SecureDataService = {
       delete approved.encryptedLat;
       delete approved.encryptedLng;
 
-      await dbPush('cameras/approved', approved);
+      const key = await dbPush('cameras/approved', approved);
+      await dbUpdate(`cameras/approved/${key}`, { id: key });
       await dbRemove(`cameras/pending/${cameraId}`);
       await SecureDataService.logAdminAction('approve_camera', { cameraId, adminId });
+
+      // Notify the user who submitted
+      if (camera.userId) {
+        await SecureDataService.addNotification(camera.userId, {
+          type: 'camera_approved',
+          cameraId: key,
+          cameraName: camera.name,
+          message: `Your camera "${camera.name}" has been approved.`
+        });
+      }
     } catch (e) {
       console.error('Approve error:', e);
     }
   },
 
   // Reject a camera
-  rejectCamera: async (cameraId, reason) => {
+  rejectCamera: async (cameraId, reason, adminId) => {
     try {
-      await dbUpdate(`cameras/pending/${cameraId}`, { status: 'rejected', rejectedAt: Date.now(), reason });
       const snapshot = await dbGet(`cameras/pending/${cameraId}`);
       const camera = snapshot;
-      if (camera) {
-        await dbPush('cameras/rejected', camera);
-        await dbRemove(`cameras/pending/${cameraId}`);
+      if (!camera) throw new Error('Camera not found');
+
+      await dbUpdate(`cameras/pending/${cameraId}`, { status: 'rejected', rejectedAt: Date.now(), reason });
+      await dbPush('cameras/rejected', { ...camera, reason, rejectedAt: Date.now() });
+      await dbRemove(`cameras/pending/${cameraId}`);
+      await SecureDataService.logAdminAction('reject_camera', { cameraId, reason, adminId });
+
+      if (camera.userId) {
+        await SecureDataService.addNotification(camera.userId, {
+          type: 'camera_rejected',
+          cameraId,
+          cameraName: camera.name,
+          message: `Your camera "${camera.name}" was rejected. Reason: ${reason || 'Not specified'}`
+        });
       }
     } catch (e) {
       console.error('Reject error:', e);
@@ -141,7 +170,7 @@ export const SecureDataService = {
     }
   },
 
-  // Update camera details
+  // Update camera details (approved)
   updateCamera: async (cameraId, updates) => {
     try {
       await dbUpdate(`cameras/approved/${cameraId}`, updates);
@@ -163,6 +192,42 @@ export const SecureDataService = {
       await dbPush('cameras/approved', approved);
     } catch (e) {
       console.error('Admin add error:', e);
+    }
+  },
+
+  getAllApprovedCameras: async () => {
+    try {
+      const snap = await dbGet('cameras/approved');
+      if (!snap) return [];
+      return Object.entries(snap).map(([id, val]) => ({ ...val, id }));
+    } catch(e) {
+      return [];
+    }
+  },
+
+  bulkUploadCameras: async (camerasArray, adminUid) => {
+    try {
+      const now = Date.now();
+      
+      const uploadPromises = camerasArray.map(async (cam, index) => {
+        const payload = {
+          ...cam,
+          approvedAt: now + index,
+          status: 'approved',
+          reports: 0,
+          isSuspicious: false,
+          approvedBy: 'Admin Bulk Archive'
+        };
+        // Use the same push method AdminAddCamera uses
+        return await dbPush('cameras/approved', payload);
+      });
+
+      await Promise.all(uploadPromises);
+      await SecureDataService.logAdminAction?.('bulk_upload', { count: camerasArray.length, adminUid });
+      return true;
+    } catch (e) {
+      console.error('Bulk upload error:', e);
+      return false;
     }
   },
 
@@ -204,7 +269,7 @@ export const SecureDataService = {
   getRealtimeLogs: (callback) => {
     return dbOnValue('admin/logs', (data) => {
       if (!data) return callback([]);
-      const list = Object.entries(data).map(([id, val]) => ({ id, ...val }));
+      const list = Object.entries(data).map(([id, val]) => ({ ...val, id }));
       callback(list);
     });
   },
@@ -234,6 +299,52 @@ export const SecureDataService = {
     }
   },
 
+  // Get all users with their profiles and contribution counts
+  getAllUsers: async () => {
+    try {
+      const usersSnap = await dbGet('users');
+      if (!usersSnap) return [];
+
+      const users = await Promise.all(
+        Object.entries(usersSnap).map(async ([uid, data]) => {
+          // Get user's cameras (approved)
+          const approvedCameras = await dbGet('cameras/approved');
+          const userApproved = approvedCameras 
+            ? Object.values(approvedCameras).filter(cam => cam.userId === uid).length 
+            : 0;
+
+          // Get user's pending cameras
+          const pendingCameras = await dbGet('cameras/pending');
+          const userPending = pendingCameras 
+            ? Object.values(pendingCameras).filter(cam => cam.userId === uid).length 
+            : 0;
+
+          // Get user's reports
+          const reports = await dbGet('cameras/reports');
+          const userReports = reports 
+            ? Object.values(reports).filter(rep => rep.userId === uid).length 
+            : 0;
+
+          return {
+            uid,
+            email: data.profile?.email || 'unknown',
+            username: data.profile?.username || 'Anonymous',
+            createdAt: data.profile?.createdAt,
+            approvedCount: userApproved,
+            pendingCount: userPending,
+            reportCount: userReports,
+            lastActive: data.activity ? Math.max(...Object.values(data.activity).map(a => a.timestamp)) : null
+          };
+        })
+      );
+
+      return users.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+    } catch (e) {
+      console.error('Get all users error:', e);
+      return [];
+    }
+  },
+
   // Export public data
   exportPublicData: async () => {
     try {
@@ -256,12 +367,14 @@ export const SecureDataService = {
   // Full backup
   exportFullBackup: async () => {
     try {
-      const [approved, pending, logs] = await Promise.all([
+      const [approved, pending, logs, users, reports] = await Promise.all([
         dbGet('cameras/approved'),
         dbGet('cameras/pending'),
-        dbGet('admin/logs')
+        dbGet('admin/logs'),
+        dbGet('users'),
+        dbGet('cameras/reports')
       ]);
-      return { approved, pending, logs };
+      return { approved, pending, logs, users, reports };
     } catch (e) {
       console.error('Backup error:', e);
       return {};
@@ -269,45 +382,44 @@ export const SecureDataService = {
   },
 
   /**
-   * Report a camera as fake/suspicious
+   * Report a camera as fake/suspicious - accepts user object
    */
-  reportCamera: async (cameraId, userId, reason = '') => {
-    console.log('📝 Reporting camera:', cameraId, 'by user:', userId);
+  reportCamera: async (camera, user, reason = '') => {
+    console.log('📝 Reporting camera:', camera?.id, 'by user:', user);
     try {
-      if (!cameraId || !userId) {
-        console.error('❌ Missing cameraId or userId');
+      if (!camera?.id || !user?.uid) {
+        console.error('❌ Missing camera.id or user.uid', { camera, user });
         return false;
       }
 
-      // Fetch camera name to store in report
-      const cameraRef = dbRefFunc(db, `cameras/approved/${cameraId}`);
-      const cameraSnap = await get(cameraRef);
-      let cameraName = 'Unknown';
-      if (cameraSnap.exists()) {
-        cameraName = cameraSnap.val().name || 'Unknown';
-      } else {
-        console.error('❌ Camera not found in approved list');
-        return false;
-      }
+      const cameraId = camera.id;
+      const cameraName = camera.name || 'Unknown';
 
-      // 1. Save the report with camera name
+      // 1. Save the report with camera name and user info
       const reportData = {
         cameraId,
         cameraName,
-        userId,
+        userId: user.uid,
+        userName: user.username || 'Anonymous',
+        userEmail: user.email || '',
         reason,
         timestamp: Date.now()
       };
+      console.log('Saving report:', reportData);
       await dbPush('cameras/reports', reportData);
 
       // 2. Update the camera's report count
-      const currentReports = cameraSnap.val().reports || 0;
+      const cameraRef = dbRefFunc(db, `cameras/approved/${cameraId}`);
+      const currentReports = camera.reports || 0;
       const newReports = currentReports + 1;
-      await update(cameraRef, { reports: newReports });
+      
+      const updates = { reports: newReports };
       if (newReports >= 5) {
-        await update(cameraRef, { isSuspicious: true });
+        updates.isSuspicious = true;
       }
-      console.log('✅ Reports counter updated');
+      await update(cameraRef, updates);
+
+      console.log('✅ Report submitted successfully');
       return true;
 
     } catch (error) {
@@ -318,14 +430,11 @@ export const SecureDataService = {
 
   /**
    * Dismiss a report (admin action)
-   * Deletes the report and decrements the camera's report count.
    */
   dismissReport: async (reportId, cameraId) => {
     try {
-      // 1. Delete the report
       await dbRemove(`cameras/reports/${reportId}`);
 
-      // 2. Decrement camera's report count
       const cameraRef = dbRefFunc(db, `cameras/approved/${cameraId}`);
       const cameraSnap = await get(cameraRef);
       if (cameraSnap.exists()) {
@@ -333,7 +442,6 @@ export const SecureDataService = {
         const newReports = Math.max(0, currentReports - 1);
         await update(cameraRef, { reports: newReports });
         if (newReports < 5) {
-          // Optionally update isSuspicious flag if it falls below threshold
           await update(cameraRef, { isSuspicious: false });
         }
       }
@@ -347,7 +455,7 @@ export const SecureDataService = {
   },
 
   /**
-   * Delete a report without affecting camera count (if needed)
+   * Delete a report without affecting camera count
    */
   deleteReport: async (reportId) => {
     try {
@@ -357,5 +465,65 @@ export const SecureDataService = {
       console.error('Delete report error:', e);
       return false;
     }
+  },
+
+  /**
+   * Update a pending camera (allowed fields: name, speedLimit, type)
+   */
+  updatePendingCamera: async (cameraId, updates, userId) => {
+    try {
+      // First verify ownership
+      const snapshot = await dbGet(`cameras/pending/${cameraId}`);
+      if (!snapshot || snapshot.userId !== userId) {
+        throw new Error('Not authorized to edit this camera');
+      }
+      const allowed = { name: 1, speedLimit: 1, type: 1 };
+      const filtered = Object.keys(updates)
+        .filter(key => allowed[key])
+        .reduce((obj, key) => ({ ...obj, [key]: updates[key] }), {});
+      if (Object.keys(filtered).length === 0) return false;
+      await dbUpdate(`cameras/pending/${cameraId}`, filtered);
+      return true;
+    } catch (e) {
+      console.error('Update pending error:', e);
+      return false;
+    }
+  },
+
+  /**
+   * Add a notification for a user
+   */
+  addNotification: async (userId, notification) => {
+    try {
+      await dbPush(`users/${userId}/notifications`, {
+        ...notification,
+        read: false,
+        timestamp: Date.now()
+      });
+    } catch (e) {
+      console.error('Add notification error:', e);
+    }
+  },
+
+  /**
+   * Mark a notification as read
+   */
+  markNotificationRead: async (userId, notificationId) => {
+    try {
+      await dbUpdate(`users/${userId}/notifications/${notificationId}`, { read: true });
+    } catch (e) {
+      console.error('Mark notification error:', e);
+    }
+  },
+
+  /**
+   * Get user notifications (real-time)
+   */
+  getUserNotifications: (userId, callback) => {
+    return dbOnValue(`users/${userId}/notifications`, (data) => {
+      if (!data) return callback([]);
+      const list = Object.entries(data).map(([id, val]) => ({ ...val, id }));
+      callback(list);
+    });
   }
 };

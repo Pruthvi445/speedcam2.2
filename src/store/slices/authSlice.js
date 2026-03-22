@@ -1,7 +1,7 @@
 import { createSlice } from '@reduxjs/toolkit';
 
 const initialState = {
-  user: null,               // { uid, email, username, ... }
+  user: null,          // will contain { uid, email, username, isAdmin, emailVerified }
   loading: true,
 };
 

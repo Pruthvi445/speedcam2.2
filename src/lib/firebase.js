@@ -1,6 +1,15 @@
 import { initializeApp, getApps, getApp } from "firebase/app";
 import { getDatabase, ref, set, push, onValue, update, remove, get } from "firebase/database";
-import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged } from "firebase/auth";
+import { 
+  getAuth, 
+  signInAnonymously, 
+  onAuthStateChanged, 
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  signOut,
+  updateProfile as firebaseUpdateProfile,
+  sendEmailVerification as firebaseSendEmailVerification
+} from "firebase/auth";
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -17,14 +26,49 @@ const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
 export const db = getDatabase(app);
 export const auth = getAuth(app);
 
-export {
+// Re-export Firebase auth functions
+export { 
+  onAuthStateChanged, 
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   signOut,
-  onAuthStateChanged,
+  firebaseUpdateProfile as updateProfile
 };
 
-// Helper functions for database operations
+// Custom functions for anonymous sign-in and convenience
+export const signInUser = async () => {
+  try {
+    const result = await signInAnonymously(auth);
+    return result;
+  } catch (error) {
+    console.error('❌ Auth error:', error);
+    return { user: { uid: 'guest-' + Date.now() } };
+  }
+};
+
+export const signInWithEmail = async (email, password) => {
+  try {
+    const result = await signInWithEmailAndPassword(auth, email, password);
+    return result;
+  } catch (error) {
+    console.error("Email sign-in error:", error);
+    throw error;
+  }
+};
+
+export const signOutUser = async () => {
+  try {
+    await signOut(auth);
+  } catch (error) {
+    console.error("Sign out error:", error);
+  }
+};
+
+export const getCurrentUser = () => {
+  return auth.currentUser;
+};
+
+// Database helpers
 export const dbRef = (path) => ref(db, path);
 
 export const dbPush = async (path, data) => {
@@ -54,4 +98,13 @@ export const dbOnValue = (path, callback, errorCallback) => {
   return onValue(ref(db, path), (snapshot) => {
     callback(snapshot.val());
   }, errorCallback);
+};
+
+// Email verification
+export const sendEmailVerification = async () => {
+  const user = auth.currentUser;
+  if (!user) throw new Error('No user logged in');
+  if (user.emailVerified) throw new Error('Email already verified');
+  await firebaseSendEmailVerification(user);
+  return true;
 };

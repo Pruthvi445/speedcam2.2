@@ -8,10 +8,11 @@ import cameraReducer from './slices/cameraSlice';
 import alertReducer from './slices/alertSlice';
 import authReducer from './slices/authSlice';
 import { auth, onAuthStateChanged, dbGet } from '@/lib/firebase';
+import { signInAnonymously } from 'firebase/auth';
 import { setUser, logout } from './slices/authSlice';
 
-// Your admin email
-const ADMIN_EMAILS = ['pruthviraj24@gmail.com']; // <-- Updated
+// Admin configuration from environment variables
+const ADMIN_EMAILS = (process.env.NEXT_PUBLIC_ADMIN_EMAILS || '').split(',').map(e => e.trim());
 
 export const store = configureStore({
   reducer: {
@@ -26,20 +27,34 @@ function AuthListener({ children }) {
   const dispatch = useDispatch();
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      if (user) {
+    console.log('🔐 INITIALIZING AUTH PROTOCOLS...');
+    let isFirstMount = true;
+
+    const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
+      if (fbUser) {
+        console.log(`👤 AUTH_SYNC: Local identity established: ${fbUser.uid}`);
         // Fetch profile from Realtime Database
-        const profile = await dbGet(`users/${user.uid}/profile`);
-        const isAdmin = ADMIN_EMAILS.includes(user.email);
+        const profile = await dbGet(`users/${fbUser.uid}/profile`);
+        const isAdmin = ADMIN_EMAILS.includes(fbUser.email);
+        
         dispatch(setUser({
-          uid: user.uid,
-          email: user.email,
-          emailVerified: user.emailVerified,
-          username: profile?.username || 'User',
+          uid: fbUser.uid,
+          email: fbUser.email || '',
+          emailVerified: fbUser.emailVerified || false,
+          username: fbUser.displayName || profile?.username || (fbUser.isAnonymous ? 'Guest Agent' : 'User'),
           isAdmin,
         }));
       } else {
-        dispatch(logout());
+        // If NO user is logged in, automatically sign in anonymously
+        console.log('🛰️ AUTH_INIT: Initiating guest credentials...');
+        try {
+          // Re-using the signInAnonymously from firebase.js import if possible or just call it
+          await signInAnonymously(auth);
+          // onAuthStateChanged will trigger again once it finishes
+        } catch (e) {
+          console.error('❌ AUTH_CRITICAL: Failed to establish guest identity:', e);
+          dispatch(logout()); // Fallback to null state
+        }
       }
     });
     return unsubscribe;

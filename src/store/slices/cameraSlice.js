@@ -8,6 +8,7 @@ const initialState = {
   crossedCount: 0,
   tripDistance: 0,
   overspeedAlert: false,
+  selectedCamera: null,
 };
 
 const cameraSlice = createSlice({
@@ -15,10 +16,24 @@ const cameraSlice = createSlice({
   initialState,
   reducers: {
     setAllCameras: (state, action) => {
-      const valid = (action.payload || []).filter(c => c && c.lat !== undefined && c.lng !== undefined);
+      const valid = (action.payload || [])
+        .filter(c => c && (c.lat !== undefined || c.latitude !== undefined) && (c.lng !== undefined || c.longitude !== undefined))
+        .map(c => ({
+          ...c,
+          lat: parseFloat(c.lat || c.latitude),
+          lng: parseFloat(c.lng || c.longitude),
+          speedLimit: parseInt(c.speedLimit || 60),
+          reports: parseInt(c.reports || 0)
+        }))
+        .filter(c => !isNaN(c.lat) && !isNaN(c.lng));
+
       state.allCameras = valid;
       state.speedCameras = valid.filter(c => c.type === 'speed' || c.type === undefined);
       state.redLightCameras = valid.filter(c => c.type === 'red' || c.type === 'redlight');
+    },
+
+    setSelectedCamera: (state, action) => {
+      state.selectedCamera = action.payload;
     },
 
     setRelevant: (state, action) => {
@@ -28,25 +43,34 @@ const cameraSlice = createSlice({
 
     // Update camera logic based on current location and speed
     updateCameraLogic: (state, action) => {
-      const { currentLoc, currentSpeed, allCameras } = action.payload;
+      const { currentLoc, currentSpeed, allCameras, distances } = action.payload;
       
-      const getDistHelper = (lat1, lon1, lat2, lon2) => {
-        const R = 6371e3;
-        const φ1 = lat1 * Math.PI / 180;
-        const φ2 = lat2 * Math.PI / 180;
-        const Δφ = (lat2 - lat1) * Math.PI / 180;
-        const Δλ = (lon2 - lon1) * Math.PI / 180;
-        const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
-                  Math.cos(φ1) * Math.cos(φ2) *
-                  Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
-        return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-      };
+      let withDist;
+      
+      if (distances) {
+        // Use pre-calculated distances from the caller
+        withDist = (allCameras || []).map(cam => ({
+          ...cam,
+          distance: distances[cam.id] !== undefined ? distances[cam.id] : 999999
+        }));
+      } else {
+        const getDistHelper = (lat1, lon1, lat2, lon2) => {
+          const R = 6371e3;
+          const φ1 = lat1 * Math.PI / 180;
+          const φ2 = lat2 * Math.PI / 180;
+          const Δφ = (lat2 - lat1) * Math.PI / 180;
+          const Δλ = (lon2 - lon1) * Math.PI / 180;
+          const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+                    Math.cos(φ1) * Math.cos(φ2) *
+                    Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+          return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        };
 
-      // Calculate distance for each camera
-      const withDist = (allCameras || []).map(cam => ({
-        ...cam,
-        distance: getDistHelper(currentLoc[0], currentLoc[1], cam.lat, cam.lng)
-      }));
+        withDist = (allCameras || []).map(cam => ({
+          ...cam,
+          distance: getDistHelper(currentLoc[0], currentLoc[1], cam.lat, cam.lng)
+        }));
+      }
 
       // Filter cameras within 3km that are not passed
       const relevant = withDist
@@ -74,9 +98,9 @@ const cameraSlice = createSlice({
       }
     },
 
-    // Set trip distance (updated from GPS)
+    // Set trip distance (accumulate from GPS updates)
     setTripDistance: (state, action) => {
-      state.tripDistance = action.payload;
+      state.tripDistance += (action.payload || 0);
       if (typeof window !== 'undefined') {
         localStorage.setItem('tripDistance', state.tripDistance.toString());
       }
@@ -96,6 +120,7 @@ const cameraSlice = createSlice({
 
 export const {
   setAllCameras,
+  setSelectedCamera,
   setRelevant,
   updateCameraLogic,
   incrementCrossed,

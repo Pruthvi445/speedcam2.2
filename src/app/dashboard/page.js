@@ -13,41 +13,27 @@ import {
   XCircle as XIcon, Globe, Zap, Flag, User as UserIcon, Mail, Calendar
 } from 'lucide-react';
 
-const GOOGLE_MAPS_KEY = process.env.NEXT_PUBLIC_GOOGLE_MAPS_KEY || 'YOUR_GOOGLE_MAPS_KEY';
-
-// --- Google Maps Modal ---
+// --- OpenStreetMap Modal ---
 const LocationChecker = ({ lat, lng, name, onClose }) => {
-  const mapRef = React.useRef(null);
-  useEffect(() => {
-    if (!window.google) {
-      const script = document.createElement('script');
-      script.src = `https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_KEY}`;
-      script.async = true;
-      script.onload = initMap;
-      document.head.appendChild(script);
-    } else { initMap(); }
-    function initMap() {
-      if (mapRef.current && window.google) {
-        const map = new window.google.maps.Map(mapRef.current, {
-          center: { lat, lng }, zoom: 18, mapTypeId: 'satellite',
-          styles: [{ featureType: 'all', elementType: 'all', stylers: [{ invert_lightness: true }, { saturation: -100 }] }]
-        });
-        new window.google.maps.Marker({ position: { lat, lng }, map, title: name });
-      }
-    }
-  }, [lat, lng, name]);
-
   return (
     <div className="fixed inset-0 z-[9999] bg-black/95 backdrop-blur-xl flex items-center justify-center p-4">
-      <div className="bg-zinc-900 rounded-[2.5rem] border border-cyan-500/30 w-full max-w-4xl overflow-hidden shadow-2xl shadow-cyan-500/10">
-        <div className="flex items-center justify-between p-6 border-b border-white/5">
+      <div className="bg-zinc-900 rounded-[2.5rem] border border-cyan-500/30 w-full max-w-4xl overflow-hidden shadow-2xl shadow-cyan-500/10 flex flex-col h-[80vh]">
+        <div className="flex items-center justify-between p-6 border-b border-white/5 shrink-0">
           <h3 className="font-black uppercase italic tracking-tighter flex items-center gap-3 text-xl">
             <MapIcon className="text-cyan-400 animate-pulse" size={24} /> Verification: {name}
           </h3>
           <button onClick={onClose} className="p-2 hover:bg-white/5 rounded-full transition-colors text-zinc-400 hover:text-white"><XIcon size={28} /></button>
         </div>
-        <div ref={mapRef} className="h-[500px] w-full" />
-        <div className="p-6 bg-black/40 flex justify-between items-center border-t border-white/5">
+        <div className="flex-1 w-full bg-black relative">
+          <iframe 
+            width="100%" 
+            height="100%" 
+            frameBorder="0" 
+            src={`https://www.openstreetmap.org/export/embed.html?bbox=${lng-0.005},${lat-0.005},${lng+0.005},${lat+0.005}&layer=mapnik&marker=${lat},${lng}`} 
+            style={{ filter: "invert(100%) hue-rotate(180deg) brightness(95%) contrast(90%)" }}
+          ></iframe>
+        </div>
+        <div className="p-6 bg-black/40 flex justify-between items-center border-t border-white/5 shrink-0">
           <code className="text-cyan-400 text-sm font-mono tracking-widest">COORD_DATA: {lat}, {lng}</code>
           <a href={`https://www.google.com/maps?q=${lat},${lng}`} target="_blank" className="bg-cyan-600 hover:bg-cyan-500 px-6 py-3 rounded-2xl text-sm font-black uppercase tracking-tighter transition-all flex items-center gap-2 shadow-lg shadow-cyan-900/20"><ExternalLink size={18} /> Deep Link Maps</a>
         </div>
@@ -321,7 +307,7 @@ export default function AdminDashboard() {
   };
 
   const handleApprove = async (id) => {
-    await SecureDataService.approveCamera?.(id, user.uid);
+    await SecureDataService.approveCamera?.(id, user);
     loadStats();
     loadUsers();
   };
@@ -333,7 +319,7 @@ export default function AdminDashboard() {
   };
 
   const handleDelete = async (id) => {
-    if (confirm('Are you sure? This cannot be undone.')) {
+    if (window.confirm('Are you sure you want to delete this camera? This cannot be undone.')) {
       await SecureDataService.deleteCamera?.(id);
       loadStats();
       loadUsers();
@@ -341,7 +327,7 @@ export default function AdminDashboard() {
   };
 
   const handleDismissReport = async (reportId, cameraId) => {
-    if (confirm('Dismiss this report? This will remove the report and decrease the camera\'s report count by 1.')) {
+    if (window.confirm('Dismiss this report? This will remove the report and decrease the camera\'s report count by 1.')) {
       const success = await SecureDataService.dismissReport?.(reportId, cameraId);
       if (success) {
         loadStats();
@@ -349,6 +335,14 @@ export default function AdminDashboard() {
       } else {
         alert('Failed to dismiss report.');
       }
+    }
+  };
+
+  const handleRemoveReportOnly = async (reportId) => {
+    if (window.confirm('Delete this report (Leave camera as-is)?')) {
+      await SecureDataService.deleteReport?.(reportId);
+      loadStats();
+      loadUsers();
     }
   };
 
@@ -398,7 +392,10 @@ export default function AdminDashboard() {
 
         camerasArray.forEach(cam => {
           if (!cam.lat || !cam.lng) return;
-          const isDuplicate = tempExisting.some(ex => parseFloat(ex.lat) === parseFloat(cam.lat) && parseFloat(ex.lng) === parseFloat(cam.lng));
+          const isDuplicate = tempExisting.some(ex => 
+            Math.abs(parseFloat(ex.lat) - parseFloat(cam.lat)) < 0.0001 && 
+            Math.abs(parseFloat(ex.lng) - parseFloat(cam.lng)) < 0.0001
+          );
           if (!isDuplicate) {
             newCamerasToPush.push({
               name: cam.name || `BulkNode-${Date.now()}`,
@@ -727,9 +724,16 @@ export default function AdminDashboard() {
             <CheckCircle size={18}/>
           </button>
           <button 
+            onClick={() => handleRemoveReportOnly(report.id)} 
+            className="p-3 bg-yellow-500/10 text-yellow-500 rounded-xl hover:bg-yellow-500 hover:text-white transition-all"
+            title="Delete Report Only (Leaves Camera As-Is)"
+          >
+            <XCircle size={18}/>
+          </button>
+          <button 
             onClick={() => handleDelete(report.cameraId)} 
             className="p-3 bg-red-500/10 text-red-500 rounded-xl hover:bg-red-500 hover:text-white transition-all"
-            title="Delete Camera"
+            title="Delete Entire Camera (& Cascade Reports)"
           >
             <Trash2 size={18}/>
           </button>

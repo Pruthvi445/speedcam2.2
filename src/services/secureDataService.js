@@ -22,8 +22,14 @@ export const SecureDataService = {
         console.error('❌ No user UID');
         throw new Error('User not authenticated');
       }
-      const encryptedLat = btoa(cameraData.lat.toString());
-      const encryptedLng = btoa(cameraData.lng.toString());
+      const obfuscate = (str) => {
+        return btoa(str.split('').map((c, i) => 
+          String.fromCharCode(c.charCodeAt(0) ^ (i % 5 + 1))
+        ).join(''));
+      };
+
+      const encryptedLat = obfuscate(cameraData.lat.toString());
+      const encryptedLng = obfuscate(cameraData.lng.toString());
 
       const submission = {
         userId: user.uid,
@@ -62,11 +68,14 @@ export const SecureDataService = {
   getApprovedCameras: (callback) => {
     return dbOnValue('cameras/approved', (data) => {
       if (!data) return callback([]);
-      const list = Object.entries(data).map(([id, val]) => ({
-        ...val,
-        id,
-        isSuspicious: (val.reports || 0) >= 5
-      }));
+      // Filter out nulls and convert to array with IDs
+      const list = Object.entries(data)
+        .filter(([_, val]) => val && typeof val === 'object')
+        .map(([id, val]) => ({
+          ...val,
+          id,
+          isSuspicious: (val.reports || 0) >= 5
+        }));
       callback(list);
     });
   },
@@ -95,21 +104,41 @@ export const SecureDataService = {
   },
 
   // Approve a camera
-  approveCamera: async (cameraId, adminId) => {
+  approveCamera: async (cameraId, adminUser) => {
     try {
-      const snapshot = await dbGet(`cameras/pending/${cameraId}`);
-      const camera = snapshot;
+      if (!adminUser?.isAdmin) {
+        throw new Error('Unauthorized: Admin rights required');
+      }
+      const camera = await dbGet(`cameras/pending/${cameraId}`);
       if (!camera) throw new Error('Camera not found');
 
-      const lat = parseFloat(atob(camera.encryptedLat));
-      const lng = parseFloat(atob(camera.encryptedLng));
+      const deobfuscate = (str) => {
+        if (!str) return "0";
+        try {
+          return atob(str).split('').map((c, i) => 
+            String.fromCharCode(c.charCodeAt(0) ^ (i % 5 + 1))
+          ).join('');
+        } catch (e) {
+          console.error('❌ SECURE_AUTH: Deobfuscation crash in approval loop:', e);
+          return "0";
+        }
+      };
+
+      const latStr = deobfuscate(camera.encryptedLat);
+      const lngStr = deobfuscate(camera.encryptedLng);
+      const lat = parseFloat(latStr);
+      const lng = parseFloat(lngStr);
+
+      if (isNaN(lat) || isNaN(lng) || lat === 0 || lng === 0) {
+        throw new Error(`MALFORMED_LOCATION: Invalid data extracted (Lat: ${lat}, Lng: ${lng})`);
+      }
 
       const approved = {
         ...camera,
         lat,
         lng,
         approvedAt: Date.now(),
-        approvedBy: adminId,
+        approvedBy: adminUser.uid,
         status: 'approved',
         reports: 0,
         isSuspicious: false
@@ -120,7 +149,7 @@ export const SecureDataService = {
       const key = await dbPush('cameras/approved', approved);
       await dbUpdate(`cameras/approved/${key}`, { id: key });
       await dbRemove(`cameras/pending/${cameraId}`);
-      await SecureDataService.logAdminAction('approve_camera', { cameraId, adminId });
+      await SecureDataService.logAdminAction('approve_camera', { cameraId, adminId: adminUser.uid });
 
       // Notify the user who submitted
       if (camera.userId) {
@@ -165,6 +194,14 @@ export const SecureDataService = {
   deleteCamera: async (cameraId) => {
     try {
       await dbRemove(`cameras/approved/${cameraId}`);
+      const reportsSnap = await dbGet('cameras/reports');
+      if (reportsSnap) {
+        Object.entries(reportsSnap).forEach(async ([rId, r]) => {
+          if (r.cameraId === cameraId) {
+            await dbRemove(`cameras/reports/${rId}`);
+          }
+        });
+      }
     } catch (e) {
       console.error('Delete error:', e);
     }
@@ -235,19 +272,37 @@ export const SecureDataService = {
   getSecureCoords: async (cameraId, isPending = true) => {
     try {
       const path = isPending ? `cameras/pending/${cameraId}` : `cameras/approved/${cameraId}`;
-      const snapshot = await dbGet(path);
-      const data = snapshot;
+      const data = await dbGet(path);
       if (!data) return null;
+      
       if (isPending) {
-        return {
-          lat: parseFloat(atob(data.encryptedLat)),
-          lng: parseFloat(atob(data.encryptedLng))
+        const deobfuscate = (str) => {
+          if (!str) return "0";
+          try {
+            return atob(str).split('').map((c, i) => 
+              String.fromCharCode(c.charCodeAt(0) ^ (i % 5 + 1))
+            ).join('');
+          } catch (e) {
+            console.warn('Deobfuscation failure for field:', str);
+            return "0";
+          }
         };
+        
+        const latStr = deobfuscate(data.encryptedLat);
+        const lngStr = deobfuscate(data.encryptedLng);
+        const lat = parseFloat(latStr);
+        const lng = parseFloat(lngStr);
+        
+        if (isNaN(lat) || isNaN(lng)) return null;
+        return { lat, lng };
       } else {
-        return { lat: data.lat, lng: data.lng };
+        return { 
+          lat: parseFloat(data.lat || 0), 
+          lng: parseFloat(data.lng || 0) 
+        };
       }
     } catch (e) {
-      console.error('Get coords error:', e);
+      console.error('🛰️ SECURE_AUTH: Critical decryption failure:', e);
       return null;
     }
   },
@@ -407,6 +462,15 @@ export const SecureDataService = {
       };
       console.log('Saving report:', reportData);
       await dbPush('cameras/reports', reportData);
+
+      // Save to user activity log
+      await SecureDataService.trackUserActivity(user.uid, {
+        type: 'report_camera',
+        cameraId,
+        cameraName,
+        reason,
+        timestamp: Date.now()
+      });
 
       // 2. Update the camera's report count
       const cameraRef = dbRefFunc(db, `cameras/approved/${cameraId}`);

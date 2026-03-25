@@ -2,201 +2,50 @@
 
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
-import { MapContainer, TileLayer, Marker, Polyline, useMap, useMapEvents, Tooltip } from 'react-leaflet';
-import L from 'leaflet';
-import 'leaflet/dist/leaflet.css';
-import {
+import { 
   Search, Navigation, AlertTriangle, Target, Activity, LocateFixed,
   Plus, MapPin, BarChart3, Volume2, VolumeX, Gauge, Camera, X, Menu,
-  Shield, Zap, Radio, TrendingUp, Eye, EyeOff, CheckCircle, Info,
-  User, LogOut, Edit2, Bell
+  Shield, Zap, Radio, CheckCircle, Info, Clock,
+  User, LogOut, Edit2, Sun, Moon, Box
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { 
   setAllCameras, 
   updateCameraLogic, 
-  incrementCrossed, 
   setTripDistance, 
-  loadFromStorage 
+  loadFromStorage,
+  setSelectedCamera
 } from '@/store/slices/cameraSlice';
-import { addAlert, clearAlert, loadHistory } from '@/store/slices/alertSlice';
+import { loadHistory } from '@/store/slices/alertSlice';
 import { updateProfile, logout } from '@/store/slices/authSlice';
-import { auth, dbGet, dbOnValue, signOut } from '@/lib/firebase';
+import { auth, dbGet, dbOnValue, signOut, dbUpdate } from '@/lib/firebase';
 import { SecureDataService } from '@/services/secureDataService';
+import Map2D from './Map2D';
+import Mappa3D from '@/app/components/Mappa3D';
+import { AlertItem } from './components/AlertItem';
+import { useGeolocation } from './hooks/useGeolocation';
+import { useSpeech } from './hooks/useSpeech';
+import { useAlerts } from './hooks/useAlerts';
+import { useCameraProximity } from './hooks/useCameraProximity';
+import { getDist } from './utils/mathUtils';
+import { Speedometer } from './components/Speedometer';
+import { MapStats } from './components/MapStats';
+import { RouteInfo } from './components/RouteInfo';
+import { NextCameraInfo } from './components/NextCameraInfo';
+import CameraDetailsSheet from './components/CameraDetailsSheet';
 
-const COLORS = {
-  sky: '#00f2ff',
-  neon: '#facc15',
-  danger: '#ff0033',
-  warning: '#ffaa00',
-  info: '#00aaff',
-  glass: 'rgba(11, 14, 20, 0.95)'
-};
 
-// --- TACTICAL ICONS (same as before) ---
-const carIcon = (h, isAlert) => new L.DivIcon({
-  className: 'car-marker-container',
-  html: `<div class="relative" style="transform: rotate(${h}deg); transition: 0.2s ease-out;">
-          <div class="scanner-ring ${isAlert ? 'ring-danger' : 'ring-cyan'}"></div>
-          <div class="car-body" style="border-bottom-color: ${isAlert ? COLORS.danger : COLORS.sky};"></div>
-         </div>`,
-  iconSize: [40, 40], iconAnchor: [20, 20]
-});
-
-const destIcon = new L.DivIcon({
-  className: 'dest-marker',
-  html: `<div class="dest-ping"><div class="ping-inner"></div><div class="ping-dot"></div></div>`,
-  iconSize: [30, 30], iconAnchor: [15, 15]
-});
-
-const routeTargetIcon = (distanceKm, durationMin) => new L.DivIcon({
-  className: 'route-target-marker',
-  html: `
-    <div style="display:flex;flex-direction:column;align-items:center;transform:translateY(-100%);">
-      <div style="background:rgba(11,14,20,0.9);border:2px solid cyan;border-radius:12px;padding:6px 14px;color:cyan;font-weight:900;white-space:nowrap;backdrop-filter:blur(8px);margin-bottom:8px;box-shadow:0 0 15px rgba(0, 242, 255, 0.4);font-family:sans-serif;letter-spacing:0.5px;">
-        <span style="color:white;">📍 ${distanceKm}</span> <span style="font-size:10px;opacity:0.7">km</span> 
-        <span style="margin:0 6px;opacity:0.4">|</span> 
-        <span style="color:white;">⏳ ${durationMin}</span> <span style="font-size:10px;opacity:0.7">min</span>
-      </div>
-      <div style="width:28px;height:28px;background:linear-gradient(135deg, #00f2ff, #0088ff);border-radius:50% 50% 50% 0;transform:rotate(-45deg);border:3px solid white;box-shadow:0 0 15px cyan;"></div>
-      <div style="width:12px;height:4px;background:rgba(0,0,0,0.5);border-radius:50%;margin-top:6px;filter:blur(2px);"></div>
-    </div>
-  `,
-  iconSize: [50, 90],
-  iconAnchor: [25, 90]
-});
-const radarIcon = (limit, passed, isNear, isSuspicious, type, onRoute = false) => new L.DivIcon({
-  className: 'radar-node-premium',
-  html: `
-    <div class="relative flex items-center justify-center" style="width: 44px; height: 44px;">
-      <!-- Pulsing tactical ring -->
-      <div class="absolute inset-0 rounded-full border border-cyan-500/30 ${isNear ? 'animate-ping' : ''}"></div>
-      
-      <!-- Glass disc -->
-      <div class="absolute inset-1 rounded-full bg-zinc-900/80 backdrop-blur-md border border-white/20 shadow-[0_0_15px_rgba(0,242,255,0.3)] flex items-center justify-center overflow-hidden">
-        <!-- Scanning sweep -->
-        <div class="absolute inset-0 bg-gradient-to-r from-transparent via-cyan-400/20 to-transparent" style="width: 100%; height: 100%; transform-origin: center; animation: radar-scan 3s linear infinite;"></div>
-        
-        <!-- Speed Limit -->
-        <span class="relative z-10 font-mono font-black text-lg ${passed ? 'text-zinc-500' : 'text-white'} tracking-tighter" style="text-shadow: 0 0 10px ${passed ? 'transparent' : 'rgba(0,242,255,0.8)'};">
-          ${limit}
-        </span>
-      </div>
-
-      <!-- Tactical Corners -->
-      <div class="absolute -inset-1 border-t-2 border-l-2 border-cyan-400/40 w-3 h-3 rounded-tl-sm"></div>
-      <div class="absolute -inset-1 border-b-2 border-r-2 border-cyan-400/40 w-3 h-3 rounded-br-sm ml-auto mt-auto"></div>
-
-      ${isSuspicious ? '<div class="absolute -top-4 -right-2 text-lg drop-shadow-[0_0_5px_rgba(255,0,0,0.8)]">⚠️</div>' : ''}
-      ${onRoute ? '<div class="absolute -inset-2 border-2 border-dashed border-red-500 rounded-full animate-[spin_10s_linear_infinite] opacity-60"></div>' : ''}
-    </div>
-  `,
-  iconSize: [44, 44], iconAnchor: [22, 22]
-});
-
-const redLightIcon = (isSuspicious, onRoute, isAlert) => new L.DivIcon({
-  className: 'red-light-marker-premium',
-  html: `
-    <div class="relative flex flex-col items-center" style="width: 32px; height: 64px;">
-      <!-- Proximity Warning Light -->
-      ${isAlert ? '<div class="absolute -inset-4 bg-red-600/20 rounded-full blur-xl animate-pulse"></div>' : ''}
-      
-      <!-- Main Chassis -->
-      <div class="relative bg-zinc-900 border-2 ${isAlert ? 'border-red-500 shadow-[0_0_20px_rgba(255,0,0,0.6)]' : 'border-zinc-700'} rounded-xl w-full h-full p-1.5 flex flex-col justify-between shadow-2xl overflow-hidden">
-        <div class="absolute inset-0 bg-gradient-to-b from-white/5 to-transparent pointer-events-none"></div>
-        
-        <!-- Emissive Bulbs -->
-        <div class="w-full aspect-square rounded-full border border-black/40 ${isAlert ? 'bg-red-500 shadow-[0_0_15px_#ff0000] animate-pulse' : 'bg-red-950/60'}"></div>
-        <div class="w-6/12 h-1 bg-zinc-800 rounded-full mx-auto my-1"></div>
-        <div class="w-full aspect-square rounded-full border border-black/40 ${isAlert ? 'bg-yellow-900/40' : 'bg-yellow-500/40 shadow-[0_0_8px_rgba(234,179,8,0.3)]'}"></div>
-        <div class="w-6/12 h-1 bg-zinc-800 rounded-full mx-auto my-1"></div>
-        <div class="w-full aspect-square rounded-full border border-black/40 ${isAlert ? 'bg-green-900/40' : 'bg-green-500/40 shadow-[0_0_8px_rgba(34,197,94,0.3)]'}"></div>
-      </div>
-
-      <!-- Tactical Brackets -->
-      <div class="absolute -left-2 top-0 bottom-0 w-1 border-y border-l border-zinc-500/40 rounded-l-md"></div>
-      <div class="absolute -right-2 top-0 bottom-0 w-1 border-y border-r border-zinc-500/40 rounded-r-md"></div>
-
-      ${isSuspicious ? '<div class="absolute -top-4 -right-4 text-lg">⚠️</div>' : ''}
-    </div>
-  `,
-  iconSize: [32, 64], iconAnchor: [16, 32]
-});
-
-const pinIcon = (isSelected) => new L.DivIcon({
-  className: 'pin-marker',
-  html: `<div class="pin-container ${isSelected ? 'pin-selected' : ''}">
-          <div class="pin-outer"></div>
-          <div class="pin-inner"></div>
-          <div class="pin-shadow"></div>
-         </div>`,
-  iconSize: [40, 40], iconAnchor: [20, 20]
-});
-
-// --- Map Controller ---
-function MapController({ coords, zoom, isLocked, routeBounds }) {
-  const map = useMap();
-  useEffect(() => {
-    if (routeBounds && !isLocked) {
-      map.flyToBounds(routeBounds, { padding: [50, 50], duration: 1.5 });
-    } else if (coords && Array.isArray(coords) && coords.length === 2 && 
-        !isNaN(coords[0]) && !isNaN(coords[1]) && isLocked) {
-      map.flyTo(coords, zoom, { animate: true, duration: 1.5 });
-    }
-  }, [coords, zoom, map, isLocked, routeBounds]);
-  return null;
-}
-
-// --- Map Click Handler ---
-function MapClickHandler({ onMapClick }) {
-  useMapEvents({ click: (e) => onMapClick(e.latlng) });
-  return null;
-}
-
-// --- Alert Item Component ---
-const AlertItem = ({ alert, onRemove }) => {
-  const getAlertConfig = (type) => {
-    switch(type) {
-      case 'CRITICAL': return { bar: 'bg-red-500', bg: 'bg-red-950/95', border: 'border-red-500', glow: 'shadow-[0_0_30px_rgba(239,68,68,0.5)]', pulse: 'animate-pulse' };
-      case 'OVERSPEED': return { bar: 'bg-orange-500', bg: 'bg-orange-950/95', border: 'border-orange-500', glow: 'shadow-[0_0_30px_rgba(249,115,22,0.5)]', pulse: 'animate-pulse' };
-      case 'REDLIGHT': return { bar: 'bg-red-600', bg: 'bg-red-950/95', border: 'border-red-400', glow: 'shadow-[0_0_25px_rgba(220,38,38,0.6)]', pulse: 'animate-pulse' };
-      case 'WARNING': return { bar: 'bg-yellow-500', bg: 'bg-yellow-950/95', border: 'border-yellow-500', glow: 'shadow-[0_0_20px_rgba(234,179,8,0.4)]', pulse: '' };
-      case 'INFO': default: return { bar: 'bg-cyan-500', bg: 'bg-cyan-950/95', border: 'border-cyan-500', glow: 'shadow-[0_0_15px_rgba(6,182,212,0.3)]', pulse: '' };
-    }
-  };
-  const cfg = getAlertConfig(alert.type);
-  return (
-    <div
-      className={`relative overflow-hidden rounded-2xl border ${cfg.border} ${cfg.bg} ${cfg.glow} ${cfg.pulse} max-w-sm w-full mx-4 cursor-pointer backdrop-blur-xl transition-all duration-300 hover:scale-[1.02]`}
-      onClick={() => onRemove(alert.id)}
-    >
-      <div className={`absolute left-0 top-0 bottom-0 w-1 ${cfg.bar}`} />
-      <div className="flex items-center gap-3 px-5 py-3">
-        <AlertTriangle size={18} className="shrink-0 opacity-90" />
-        <div className="flex-1 min-w-0">
-          <div className="text-[9px] font-black uppercase tracking-[2px] opacity-60 mb-0.5">{alert.type}</div>
-          <div className="text-sm font-bold leading-tight truncate">{alert.message}</div>
-        </div>
-        <X size={14} className="shrink-0 opacity-40" />
-      </div>
-    </div>
-  );
-};
-
+// --- Speedcam HUD ---
 export default function SpeedcamHUD() {
   const dispatch = useDispatch();
   const router = useRouter();
-  const { allCameras, relevantCameras, crossedCount, overspeedAlert, tripDistance } = useSelector(state => state.camera);
+  const { allCameras, relevantCameras, crossedCount, overspeedAlert, tripDistance, selectedCamera } = useSelector(state => state.camera);
 
   const { user } = useSelector(state => state.auth); // from Redux
 
-  // Location state
-  const [myLoc, setMyLoc] = useState([18.5204, 73.8567]);
-  const [speed, setSpeed] = useState(0);
-  const [heading, setHeading] = useState(0);
   const [odo, setOdo] = useState(0);
 
-  // UI state
+  const [theme, setTheme] = useState('night');
   const [search, setSearch] = useState('');
   const [route, setRoute] = useState([]);
   const [routeBounds, setRouteBounds] = useState(null);
@@ -211,6 +60,8 @@ export default function SpeedcamHUD() {
   const [showProfile, setShowProfile] = useState(false);
   const [editUsername, setEditUsername] = useState('');
   const [isEditing, setIsEditing] = useState(false);
+  const [isSwapped, setIsSwapped] = useState(false);
+  const [is3DActive, setIs3DActive] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
 
   // Privacy notice
@@ -235,174 +86,37 @@ export default function SpeedcamHUD() {
   const [audioEnabled, setAudioEnabled] = useState(true);
   const [language, setLanguage] = useState('english');
   const [voiceType, setVoiceType] = useState('male');
-  const [alertDistance, setAlertDistance] = useState(1000);
+  const [alertDistance, setAlertDistance] = useState(3000);
 
-  // Alerts
-  const [alerts, setAlerts] = useState([]);
-  const alertTimeouts = useRef({});
 
-  // Camera tracking
-  const [selectedCameras, setSelectedCameras] = useState([]);
-  const [cameraDetails, setCameraDetails] = useState({});
-  const [showCameraInfo, setShowCameraInfo] = useState(false);
-  const [selectedCamera, setSelectedCamera] = useState(null);
-  const [distanceHistory, setDistanceHistory] = useState([]);
-
-  // Report modal
-  const [showReportModal, setShowReportModal] = useState(false);
-  const [reportReason, setReportReason] = useState('');
-  const [reportingCamera, setReportingCamera] = useState(null);
-
-  // Refs
-  const lastPos = useRef(null);
-  const chartRef = useRef(null);
-  const speechSynth = useRef(null);
-  const lastSpokenTime = useRef(null);
-  const isSpeaking = useRef(false);
-  const speechQueue = useRef([]);
+  // Camera and Report states now managed tightly via Redux & CameraDetailsSheet
   const crossedSet = useRef(new Set());
+  const allCamerasRef = useRef(allCameras);
 
-  // --- UTILITY FUNCTIONS (same as before) ---
-  const getDist = useCallback((lat1, lon1, lat2, lon2) => {
-    const R = 6371e3;
-    const φ1 = lat1 * Math.PI / 180;
-    const φ2 = lat2 * Math.PI / 180;
-    const Δφ = (lat2 - lat1) * Math.PI / 180;
-    const Δλ = (lon2 - lon1) * Math.PI / 180;
-    const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
-              Math.cos(φ1) * Math.cos(φ2) *
-              Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-    return R * c;
-  }, []);
-
-  const getAlertType = useCallback((distance, userSpeed, speedLimit) => {
-    if (userSpeed > speedLimit) return 'OVERSPEED';
-    if (distance < 200) return 'CRITICAL';
-    if (distance < 500) return 'WARNING';
-    if (distance < 1000) return 'INFO';
-    return null;
-  }, []);
-
-  // --- SPEECH SYSTEM (same) ---
-  const processSpeechQueue = useCallback(() => {
-    if (isSpeaking.current || speechQueue.current.length === 0) return;
-    const nextUtterance = speechQueue.current.shift();
-    isSpeaking.current = true;
-    if (speechSynth.current) speechSynth.current.speak(nextUtterance);
-  }, []);
-
-  const speakMultiple = useCallback((camerasInRange, userSpeed) => {
-    if (!audioEnabled || !speechSynth.current || camerasInRange.length === 0) return;
-
-    const now = Date.now();
-    if (lastSpokenTime.current && (now - lastSpokenTime.current) < 5000) return;
-    lastSpokenTime.current = now;
-
-    let message = '';
-    if (language === 'hindi') {
-      if (camerasInRange.length === 1) {
-        const cam = camerasInRange[0];
-        if (cam.type === 'red') {
-          message = `लाल बत्ती कैमरा ${Math.round(cam.distance)} मीटर आगे है। ट्रैफिक सिग्नल का पालन करें।`;
-        } else {
-          message = `स्पीड कैमरा ${Math.round(cam.distance)} मीटर आगे है। आपकी गति ${Math.round(userSpeed)} किलोमीटर प्रति घंटा है। सीमा ${cam.speedLimit} है।`;
-        }
-        if (cam.isSuspicious) {
-          message = '⚠️ ये कैमरा 5+ यूजर्स ने फेक रिपोर्ट किया है! सावधान। ' + message;
-        }
-      } else {
-        message = `सावधान! ${camerasInRange.length} कैमरे 100 मीटर के अंदर हैं। `;
-        camerasInRange.forEach((cam, index) => {
-          const typeText = cam.type === 'red' ? 'लाल बत्ती' : 'स्पीड';
-          message += `${index + 1}. ${typeText} कैमरा ${Math.round(cam.distance)} मीटर आगे`;
-          if (cam.type !== 'red') message += `, सीमा ${cam.speedLimit}`;
-          message += `. `;
-          if (cam.isSuspicious) {
-            message += '(फेक रिपोर्टेड) ';
-          }
-        });
-      }
-    } else {
-      if (camerasInRange.length === 1) {
-        const cam = camerasInRange[0];
-        if (cam.type === 'red') {
-          message = `Red light camera ${Math.round(cam.distance)} meters ahead. Obey traffic signal.`;
-        } else {
-          message = `Speed camera ${Math.round(cam.distance)} meters ahead. Your speed ${Math.round(userSpeed)} km/h. Limit ${cam.speedLimit}.`;
-        }
-        if (cam.isSuspicious) {
-          message = '⚠️ This camera has been reported fake by 5+ users. Proceed with caution. ' + message;
-        }
-      } else {
-        message = `Caution! ${camerasInRange.length} cameras within 100 meters. `;
-        camerasInRange.forEach((cam, index) => {
-          const typeText = cam.type === 'red' ? 'Red light' : 'Speed';
-          message += `${index + 1}. ${typeText} camera ${Math.round(cam.distance)} meters ahead`;
-          if (cam.type !== 'red') message += `, limit ${cam.speedLimit}`;
-          message += `. `;
-          if (cam.isSuspicious) {
-            message += '(reported fake) ';
-          }
-        });
-      }
-    }
-
-    const utterance = new SpeechSynthesisUtterance(message);
-    utterance.lang = language === 'hindi' ? 'hi-IN' : 'en-US';
-    utterance.rate = 0.9;
-    utterance.pitch = voiceType === 'male' ? 0.8 : 1.2;
-
-    utterance.onstart = () => { isSpeaking.current = true; };
-    utterance.onend = () => {
-      isSpeaking.current = false;
-      processSpeechQueue();
-    };
-    utterance.onerror = () => {
-      isSpeaking.current = false;
-      processSpeechQueue();
-    };
-
-    if (isSpeaking.current) {
-      speechSynth.current.cancel();
-      speechQueue.current = [utterance];
-    } else {
-      speechQueue.current.push(utterance);
-      processSpeechQueue();
-    }
-  }, [audioEnabled, language, voiceType, processSpeechQueue]);
-
-  // --- ALERT SYSTEM (same) ---
-  const addLocalAlert = useCallback((type, message, cameraId = null) => {
-    const id = Date.now() + Math.random();
-    const newAlert = { id, type, message, cameraId, timestamp: Date.now() };
-    setAlerts(prev => [newAlert, ...prev].slice(0, 5));
-
-    if (alertTimeouts.current[id]) clearTimeout(alertTimeouts.current[id]);
-    alertTimeouts.current[id] = setTimeout(() => {
-      setAlerts(prev => prev.filter(a => a.id !== id));
-      delete alertTimeouts.current[id];
-    }, 5000);
-
-    if (type === 'CRITICAL' && navigator.vibrate) {
-      navigator.vibrate([500, 200, 500]);
-    }
-  }, []);
-
-  const removeAlert = useCallback((id) => {
-    setAlerts(prev => prev.filter(a => a.id !== id));
-    if (alertTimeouts.current[id]) {
-      clearTimeout(alertTimeouts.current[id]);
-      delete alertTimeouts.current[id];
-    }
-  }, []);
-
-  // --- INITIALIZATION ---
+  // Keep allCamerasRef updated
   useEffect(() => {
-    if (typeof window !== 'undefined' && window.speechSynthesis) {
-      speechSynth.current = window.speechSynthesis;
-    }
-  }, []);
+    allCamerasRef.current = allCameras;
+  }, [allCameras]);
+
+  // Hook Initialization
+  const { alerts, addLocalAlert, removeAlert } = useAlerts();
+  const { speechBlocked, speakMultiple, enableAudioManually, getMessage } = useSpeech(language, voiceType, audioEnabled);
+  const { processLocationUpdate } = useCameraProximity(
+    dispatch, 
+    allCameras, 
+    crossedSet, 
+    alertDistance, 
+    addLocalAlert, 
+    speakMultiple
+  );
+
+  const { myLoc, speed, heading } = useGeolocation(processLocationUpdate, (err, code) => {
+    let errorMsg = getMessage('gps_signal_lost');
+    if (code === 1) errorMsg = getMessage('gps_permission_denied');
+    addLocalAlert('ERROR', errorMsg);
+  });
+
+
 
   useEffect(() => {
     dispatch(loadFromStorage());
@@ -411,16 +125,58 @@ export default function SpeedcamHUD() {
 
   // Real‑time listener for approved cameras
   useEffect(() => {
-    console.log('🚀 Setting up approved cameras listener (HUD)');
+    console.log('🚀 INITIALIZING REAL-TIME CAMERA FETCH...');
+    
+    // 1. Approved Cameras
     const unsubscribe = SecureDataService.getApprovedCameras((cameras) => {
-      console.log(`🔢 Approved cameras count: ${cameras.length}`);
+      console.log(`📡 FIREBASE_SYNC: Received ${cameras.length} items from cameras/approved`);
       dispatch(setAllCameras(cameras));
     });
+
     return () => {
-      console.log('🧹 Cleaning up approved cameras listener');
+      console.log('🧹 RELEASING CAMERA LISTENER');
       unsubscribe();
     };
   }, [dispatch]);
+
+  // 2. Pending Cameras (Visibility for Admin OR Owner)
+  const [pendingCameras, setPendingCameras] = useState([]);
+  useEffect(() => {
+    if (!user) {
+      setPendingCameras([]);
+      return;
+    }
+    console.log(`👀 Listening for pending submissions (UID: ${user.uid})...`);
+    const unsubscribe = SecureDataService.getPendingCameras(async (pendingList) => {
+      // Logic: If admin, show all pending. If not admin, show only OWN pending.
+      const filteredList = user.isAdmin 
+        ? pendingList 
+        : pendingList.filter(pc => pc.userId === user.uid);
+
+      // Decrypt coordinates for display
+      const decryptedList = await Promise.all(filteredList.map(async (pc) => {
+        if (pc.lat && pc.lng) return pc;
+        const coords = await SecureDataService.getSecureCoords(pc.id, true);
+        return { ...pc, ...coords, status: 'pending' };
+      }));
+      
+      const validPending = decryptedList.filter(c => c.lat && c.lng);
+      console.log(`⏳ PENDING_SYNC: Displaying ${validPending.length} nodes to current user`);
+      setPendingCameras(validPending);
+    });
+    return unsubscribe;
+  }, [user]);
+
+  // Combine both for map rendering
+  const displayCameras = useMemo(() => {
+    // Merge approved and relevant pending
+    return [...allCameras, ...pendingCameras];
+  }, [allCameras, pendingCameras]);
+
+  // Debug check for store state
+  useEffect(() => {
+    console.log('🧪 CURRENT REDUX STATE - Cameras count:', allCameras.length);
+  }, [allCameras]);
 
   // Notifications listener for unread count
   useEffect(() => {
@@ -437,125 +193,11 @@ export default function SpeedcamHUD() {
   // Clean up stale selections
   useEffect(() => {
     if (selectedCamera && !allCameras.some(c => c.id === selectedCamera.id)) {
-      setShowCameraInfo(false);
-      setSelectedCamera(null);
+      dispatch(setSelectedCamera(null));
     }
-    if (reportingCamera && !allCameras.some(c => c.id === reportingCamera.id)) {
-      setShowReportModal(false);
-      setReportingCamera(null);
-    }
-  }, [allCameras, selectedCamera, reportingCamera]);
+  }, [allCameras, selectedCamera, dispatch]);
 
-  // --- GPS TRACKING (unchanged, uses allCameras, getDist, etc.) ---
-  useEffect(() => {
-    if (!navigator.geolocation) return;
 
-    let lastUpdateTime = Date.now();
-    const MIN_UPDATE_INTERVAL = 1000;
-    let firstFix = true;
-
-    const watchId = navigator.geolocation.watchPosition((pos) => {
-      const now = Date.now();
-      if (now - lastUpdateTime < MIN_UPDATE_INTERVAL) return;
-      lastUpdateTime = now;
-
-      const { latitude, longitude, speed: s, heading: h } = pos.coords;
-      const kmh = s ? Math.round(s * 3.6) : 0;
-
-      if (!firstFix && lastPos.current) {
-        const d = getDist(lastPos.current[0], lastPos.current[1], latitude, longitude);
-        if (d > 0.1) {
-          const newOdo = odo + d;
-          setOdo(newOdo);
-          dispatch(setTripDistance(newOdo));
-        }
-      }
-      firstFix = false;
-      lastPos.current = [latitude, longitude];
-      setMyLoc([latitude, longitude]);
-      setSpeed(kmh);
-      setHeading(h || 0);
-
-      const camerasInRange = allCameras
-        .map(cam => ({
-          ...cam,
-          distance: getDist(latitude, longitude, cam.lat, cam.lng)
-        }))
-        .filter(cam => cam.distance <= 100)
-        .sort((a, b) => a.distance - b.distance);
-
-      if (camerasInRange.length > 0) {
-        speakMultiple(camerasInRange, kmh);
-      }
-
-      allCameras.forEach(cam => {
-        const dist = getDist(latitude, longitude, cam.lat, cam.lng);
-        if (dist < 50 && !crossedSet.current.has(cam.id)) {
-          crossedSet.current.add(cam.id);
-          dispatch(incrementCrossed());
-          addLocalAlert('INFO', `Passed ${cam.name}`, cam.id);
-        }
-      });
-
-      const redCameras = allCameras
-        .filter(cam => cam.type === 'red')
-        .map(cam => ({ ...cam, distance: getDist(latitude, longitude, cam.lat, cam.lng) }));
-
-      redCameras.forEach(cam => {
-        if (cam.distance < 200 && !crossedSet.current.has(cam.id)) {
-          addLocalAlert('REDLIGHT', `Red light camera ahead at ${cam.name}. Obey traffic signal!`, cam.id);
-        }
-      });
-
-      let nearestCam = null;
-      let minDist = Infinity;
-      allCameras.forEach(cam => {
-        const d = getDist(latitude, longitude, cam.lat, cam.lng);
-        if (d < minDist) {
-          minDist = d;
-          nearestCam = cam;
-        }
-      });
-
-      setSelectedCameras(camerasInRange);
-
-      if (nearestCam && nearestCam.type !== 'red' && minDist < alertDistance) {
-        const alertType = getAlertType(minDist, kmh, nearestCam.speedLimit);
-        if (alertType) {
-          const alertMessage = `${nearestCam.name} ${Math.round(minDist)}m ahead. Your speed ${kmh} km/h, limit ${nearestCam.speedLimit}.`;
-          addLocalAlert(alertType, alertMessage, nearestCam.id);
-        }
-      }
-
-      if (nearestCam) {
-        setDistanceHistory(prev => [...prev.slice(-30), {
-          time: new Date().toLocaleTimeString(),
-          distance: Math.round(minDist),
-          speed: kmh,
-          limit: nearestCam.speedLimit,
-          type: nearestCam.type
-        }]);
-      }
-
-      dispatch(updateCameraLogic({
-        currentLoc: [latitude, longitude],
-        currentSpeed: kmh,
-        allCameras
-      }));
-    }, null, { enableHighAccuracy: true, maximumAge: 0, timeout: 5000 });
-
-    return () => navigator.geolocation.clearWatch(watchId);
-  }, [allCameras, getDist, alertDistance, addLocalAlert, getAlertType, speakMultiple, dispatch, odo]);
-
-  // Chart drawing (unchanged)
-  useEffect(() => {
-    if (!chartRef.current || distanceHistory.length < 2) return;
-    const ctx = chartRef.current.getContext('2d');
-    const w = chartRef.current.width = 300;
-    const h = chartRef.current.height = 120;
-    ctx.clearRect(0, 0, w, h);
-    // ... (chart drawing code – omitted for brevity)
-  }, [distanceHistory]);
 
   // --- HANDLERS ---
   const handleUpdateProfile = async () => {
@@ -577,7 +219,7 @@ export default function SpeedcamHUD() {
       if (!geoRes.ok) throw new Error('Geocoding failed');
       const geo = await geoRes.json();
       if (!geo.features.length) {
-        addLocalAlert('WARNING', language === 'hindi' ? 'स्थान नहीं मिला' : 'Location not found');
+        addLocalAlert('WARNING', getMessage('location_not_found'));
         return;
       }
       const [lng, lat] = geo.features[0].geometry.coordinates;
@@ -606,11 +248,12 @@ export default function SpeedcamHUD() {
       setIsLocked(false);
     } catch (err) {
       console.error(err);
-      addLocalAlert('ERROR', language === 'hindi' ? 'खोज विफल' : 'Search failed: ' + err.message);
+      addLocalAlert('ERROR', getMessage('search_failed', { error: err.message }));
     }
   }, [search, myLoc, addLocalAlert, language]);
 
   const handleMapClick = useCallback((latlng) => {
+    dispatch(setSelectedCamera(null)); // Deselect on map click
     if (pinMode) {
       setTempPin([latlng.lat, latlng.lng]);
       setPinMode(false);
@@ -640,30 +283,37 @@ export default function SpeedcamHUD() {
 
     try {
       const cameraData = {
-        lat: tempPin[0],
-        lng: tempPin[1],
-        speedLimit: parseInt(newCam.speedLimit),
+        lat: parseFloat(tempPin[0].toFixed(6)),
+        lng: parseFloat(tempPin[1].toFixed(6)),
+        speedLimit: parseInt(newCam.speedLimit) || 60,
         type: newCam.type || 'speed'
       };
 
-      await SecureDataService.submitCameraRequest(cameraData, user);
+      console.log('📤 Transmitting camera data through SecureDataService...', cameraData);
+      const key = await SecureDataService.submitCameraRequest(cameraData, user);
+      
+      if (!key) throw new Error('Network failure: Key not received');
+      console.log('🛰️ Camera added to Firebase with key:', key);
 
       setSubmitSuccess(true);
       setNewCam({ speedLimit: 60, type: 'speed' });
       setTempPin(null);
       setActiveTab('hud');
       setSheetHeight('30%');
+      
+      // Success Alert
+      addLocalAlert('SUCCESS', getMessage('camera_submitted'));
 
       setTimeout(() => {
         setSubmitSuccess(false);
       }, 3000);
     } catch (err) {
       console.error('Submit error:', err);
-      alert('Submission failed: ' + err.message);
+      addLocalAlert('ERROR', getMessage('submit_failed', { error: err.message }));
     } finally {
       setSubmitLoading(false);
     }
-  }, [tempPin, newCam, user, router]);
+  }, [tempPin, newCam, user, router, language, addLocalAlert]);
 
   const cycleSheetHeight = useCallback(() => {
     if (sheetHeight === '30%') setSheetHeight('70%');
@@ -678,93 +328,10 @@ export default function SpeedcamHUD() {
       .sort((a, b) => a.d - b.d)[0] || null;
   }, [allCameras, myLoc, getDist]);
 
-  const handleReport = async () => {
-    if (!reportingCamera || !user?.uid) {
-      alert('Please login to report');
-      router.push('/auth');
-      return;
-    }
-    if (!allCameras.some(c => c.id === reportingCamera.id)) {
-      alert('Camera no longer exists in the database.');
-      setShowReportModal(false);
-      setReportingCamera(null);
-      return;
-    }
+  const handleMarkerClick = useCallback((cam) => {
+    dispatch(setSelectedCamera(cam));
+  }, [dispatch]);
 
-    console.log('🚨 Reporting camera:', reportingCamera.id, 'reason:', reportReason);
-    const success = await SecureDataService.reportCamera(reportingCamera, user, reportReason);
-    if (success) {
-      addLocalAlert('INFO', language === 'hindi' ? 'रिपोर्ट भेज दी गई' : 'Report submitted');
-      setShowReportModal(false);
-      setReportReason('');
-      setReportingCamera(null);
-    } else {
-      alert('Failed to submit report. Check console for details.');
-    }
-  };
-
-  const CameraInfoPanel = useCallback(({ camera, onClose }) => {
-    if (!camera) return null;
-    const distance = getDist(myLoc[0], myLoc[1], camera.lat, camera.lng);
-    const timeToReach = distance / (speed * 0.27778 || 1);
-
-    return (
-      <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-[2000] bg-black/95 border-2 border-cyan-500 rounded-2xl p-6 w-80 md:w-96 backdrop-blur-xl shadow-2xl">
-        <button onClick={onClose} className="absolute top-4 right-4 text-zinc-400 hover:text-white"><X size={20} /></button>
-        <div className="flex items-center gap-4 mb-6">
-          <div className="w-12 h-12 bg-cyan-500/20 rounded-full flex items-center justify-center"><Camera size={24} className="text-cyan-400" /></div>
-          <div>
-            <h3 className="text-xl font-black text-white">{camera.name}</h3>
-            <p className="text-xs text-cyan-400">ID: {camera.id}</p>
-            {camera.isSuspicious && (
-              <span className="mt-1 inline-block bg-red-600/80 text-white px-2 py-0.5 rounded text-[10px] font-bold">
-                ⚠️ SUSPICIOUS (5+ reports)
-              </span>
-            )}
-          </div>
-        </div>
-        <div className="grid grid-cols-2 gap-4 mb-6">
-          <div className="bg-zinc-900 p-3 rounded-xl">
-            <div className="text-[8px] text-zinc-500 uppercase">Distance</div>
-            <div className="text-2xl font-black text-cyan-400">{Math.round(distance)}m</div>
-          </div>
-          <div className="bg-zinc-900 p-3 rounded-xl">
-            <div className="text-[8px] text-zinc-500 uppercase">Time</div>
-            <div className="text-2xl font-black text-yellow-400">
-              {timeToReach < 60 ? `${Math.round(timeToReach)}s` : `${Math.round(timeToReach / 60)}m`}
-            </div>
-          </div>
-        </div>
-        <div className="space-y-3">
-          {camera.type !== 'red' && (
-            <div className="flex justify-between py-2 border-b border-white/10">
-              <span className="text-zinc-400">Speed Limit</span>
-              <span className="text-xl font-black text-yellow-400">{camera.speedLimit} km/h</span>
-            </div>
-          )}
-          <div className="flex justify-between py-2">
-            <span className="text-zinc-400">Reports</span>
-            <span className="text-xl font-black text-red-400">{camera.reports || 0}</span>
-          </div>
-          <div className="flex justify-between py-2">
-            <span className="text-zinc-400">Type</span>
-            <span className="text-xl font-black text-cyan-400">{camera.type === 'red' ? 'Red Light Camera' : 'Speed Camera'}</span>
-          </div>
-        </div>
-
-        <button
-          onClick={() => {
-            setReportingCamera(camera);
-            setShowReportModal(true);
-            onClose();
-          }}
-          className="mt-6 w-full bg-red-600 hover:bg-red-500 py-3 rounded-xl font-bold flex items-center justify-center gap-2"
-        >
-          <AlertTriangle size={18} /> {language === 'hindi' ? 'फेक रिपोर्ट करें' : 'Report as Fake'}
-        </button>
-      </div>
-    );
-  }, [myLoc, speed, getDist, language]);
 
   // --- RENDER ---
   return (
@@ -798,49 +365,89 @@ export default function SpeedcamHUD() {
       )}
 
       {/* Top Bar */}
-      <div className="absolute top-0 inset-x-0 z-[1000] px-3 pt-3 pb-2 flex items-center gap-2" style={{background:'linear-gradient(to bottom, rgba(0,0,0,0.92) 0%, rgba(0,0,0,0.6) 60%, transparent 100%)', backdropFilter:'blur(0px)'}}>
+      <div className={`absolute top-0 inset-x-0 z-[1000] px-3 pt-3 pb-2 flex items-center gap-2 transition-all duration-500 ${theme==='night' ? '' : 'bg-white/40 shadow-sm blur-bg-overlay'}`} style={{background: theme==='night' ? 'linear-gradient(to bottom, rgba(0,0,0,0.92) 0%, rgba(0,0,0,0.6) 60%, transparent 100%)' : undefined, backdropFilter: theme==='night' ? 'blur(0px)' : 'blur(20px)'}}>
         {/* Brand + Lock */}
         <div className="flex items-center gap-2 shrink-0">
-          <div className="flex items-center gap-1.5 bg-black/60 border border-cyan-500/40 rounded-xl px-3 py-1.5 shadow-[0_0_12px_rgba(0,242,255,0.15)]">
-            <Zap size={12} className="text-cyan-400" />
-            <span className="text-[11px] font-black tracking-[2px] text-cyan-400">SPEEDCAM</span>
+          <div className={`flex items-center gap-1.5 border rounded-xl px-3 py-1.5 shadow-lg transition-all ${theme==='night' ? 'bg-black/60 border-cyan-500/40' : 'bg-white border-zinc-200'}`}>
+            <Zap size={12} className={theme==='night'?'text-cyan-400':'text-blue-600'} />
+            <span className={`text-[11px] font-black tracking-[2px] ${theme==='night'?'text-cyan-400':'text-zinc-900'}`}>SPEEDCAM</span>
           </div>
+          <button 
+            onClick={() => setTheme(theme==='night'?'day':'night')} 
+            className={`p-2 rounded-xl border transition-all duration-300 ${theme==='night' ? 'bg-cyan-500/20 border-cyan-500/40 text-cyan-400 shadow-[0_0_12px_rgba(0,242,255,0.2)]' : 'bg-white border-zinc-200 text-blue-600 shadow-md'}`}
+          >
+            {theme==='night' ? <Moon size={16} /> : <Sun size={16} />}
+          </button>
           <button
             onClick={() => setIsLocked(!isLocked)}
-            className={`p-2 rounded-xl border transition-all duration-300 ${isLocked ? 'bg-cyan-500/20 border-cyan-500/60 text-cyan-400 shadow-[0_0_10px_rgba(0,242,255,0.2)]' : 'bg-black/40 border-white/10 text-zinc-500'}`}
+            className={`p-2 rounded-xl border transition-all duration-300 ${isLocked ? (theme==='night' ? 'bg-cyan-500/20 border-cyan-500/60 text-cyan-400 shadow-[0_0_10px_rgba(0,242,255,0.2)]' : 'bg-blue-50 border-blue-200 text-blue-600 shadow-sm') : (theme==='night' ? 'bg-black/40 border-white/10 text-zinc-500' : 'bg-white border-zinc-100 text-zinc-400')}`}
           >
             <LocateFixed size={16} />
           </button>
+          <button
+            onClick={() => setIs3DActive(!is3DActive)}
+            className={`p-2 rounded-xl border transition-all duration-300 ${is3DActive ? (theme==='night' ? 'bg-cyan-500/30 border-cyan-400 text-cyan-400 shadow-[0_0_15px_rgba(0,242,255,0.4)]' : 'bg-blue-600 border-blue-600 text-white shadow-lg') : (theme==='night' ? 'bg-black/40 border-white/10 text-zinc-500' : 'bg-white border-zinc-100 text-zinc-400')}`}
+          >
+            <Box size={16} />
+          </button>
+          
+          {speechBlocked && (
+            <button
+              onClick={enableAudioManually}
+              className="p-2 rounded-xl border bg-orange-500/20 border-orange-500 text-orange-400 shadow-[0_0_15px_rgba(0,242,255,0.4)] animate-pulse flex items-center gap-2"
+              title="Click to Enable Audio"
+            >
+              <VolumeX size={16} />
+              <span className="text-[10px] font-black hidden md:block">ENABLE AUDIO</span>
+            </button>
+          )}
         </div>
         {/* Search */}
         <form onSubmit={handleSearch} className="flex-1 relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-cyan-500/70" size={15} />
+          <Search className={`absolute left-3 top-1/2 -translate-y-1/2 ${theme==='night'?'text-cyan-500/70':'text-blue-500/70'}`} size={15} />
           <input
-            className="w-full bg-black/70 border border-white/10 rounded-xl py-2 pl-9 pr-4 text-xs focus:border-cyan-500/70 focus:bg-black/90 outline-none transition-all duration-300 placeholder:text-zinc-600"
+            className={`w-full border rounded-xl py-2 pl-9 pr-4 text-xs outline-none transition-all duration-300 placeholder:text-zinc-600 ${theme==='night' ? 'bg-black/70 border-white/10 focus:border-cyan-500/70 focus:bg-black/90 text-white' : 'bg-white/90 border-zinc-200 focus:border-blue-500 text-zinc-900 shadow-lg'}`}
             style={{backdropFilter:'blur(12px)'}}
             placeholder={language === 'hindi' ? 'गंतव्य खोजें...' : 'Search destination...'}
             value={search}
             onChange={e => setSearch(e.target.value)}
           />
+          {(search || targetCoords) && (
+            <button
+              type="button"
+              onClick={() => {
+                setSearch('');
+                setTargetCoords(null);
+                setRoute([]);
+                setRouteBounds(null);
+                setRouteDistance(null);
+                setRouteDuration(null);
+                setIsLocked(true);
+              }}
+              className={`absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-full hover:bg-white/10 ${theme==='night'?'text-cyan-500':'text-blue-500'}`}
+            >
+              <X size={14} />
+            </button>
+          )}
         </form>
         {/* Profile */}
-        <button onClick={() => setShowProfile(!showProfile)} className="relative p-2 bg-black/60 rounded-xl border border-white/10 hover:border-cyan-500/40 transition-all">
-          <User size={17} className={user ? 'text-cyan-400' : 'text-zinc-500'} />
+        <button onClick={() => setShowProfile(!showProfile)} className={`relative p-2 rounded-xl border transition-all ${theme==='night' ? 'bg-black/60 border-white/10 hover:border-cyan-500/40' : 'bg-white/90 border-zinc-200 hover:border-blue-500 shadow-md'}`}>
+          <User size={17} className={user ? (theme==='night'?'text-cyan-400':'text-blue-600') : 'text-zinc-500'} />
           {unreadCount > 0 && (
             <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[9px] w-4 h-4 rounded-full flex items-center justify-center font-black shadow-[0_0_8px_rgba(239,68,68,0.6)]">
               {unreadCount}
             </span>
           )}
         </button>
-        <button onClick={() => setShowMenu(!showMenu)} className="p-2 bg-black/60 rounded-xl border border-white/10 hover:border-white/30 transition-all">
-          <Menu size={17} /></button>
+        <button onClick={() => setShowMenu(!showMenu)} className={`p-2 rounded-xl border transition-all ${theme==='night' ? 'bg-black/60 border-white/10 hover:border-white/30' : 'bg-white/90 border-zinc-200 hover:bg-zinc-100 shadow-md'}`}>
+          <Menu size={17} className={theme==='night'?'text-white':'text-zinc-900'} /></button>
       </div>
 
       {/* User Profile Panel */}
       {showProfile && (
-        <div className="absolute top-16 right-3 z-[1001] bg-black/95 border border-white/10 rounded-xl p-4 w-64 backdrop-blur-xl">
+        <div className={`absolute top-16 right-3 z-[1001] border rounded-xl p-4 w-64 backdrop-blur-xl transition-all shadow-2xl ${theme==='night' ? 'bg-black/95 border-white/10' : 'bg-white/95 border-zinc-200'}`}>
           <div className="flex items-center gap-3 mb-4">
-            <div className="w-10 h-10 rounded-full bg-cyan-600 flex items-center justify-center">
+            <div className={`w-10 h-10 rounded-full flex items-center justify-center ${theme==='night' ? 'bg-cyan-600' : 'bg-blue-600'} text-white`}>
               <User size={20} />
             </div>
             <div className="flex-1">
@@ -849,17 +456,17 @@ export default function SpeedcamHUD() {
                   type="text"
                   value={editUsername}
                   onChange={(e) => setEditUsername(e.target.value)}
-                  className="bg-black border border-cyan-500 rounded px-2 py-1 text-sm w-full"
+                  className={`border rounded px-2 py-1 text-sm w-full outline-none ${theme==='night' ? 'bg-black border-cyan-500 text-white' : 'bg-white border-blue-500 text-zinc-900'}`}
                   autoFocus
                 />
               ) : (
-                <p className="font-bold">{user?.username || 'User'}</p>
+                <p className={`font-bold ${theme==='night' ? 'text-white' : 'text-zinc-900'}`}>{user?.username || 'User'}</p>
               )}
               <p className="text-xs text-zinc-500">{user?.email || 'Not logged in'}</p>
             </div>
             {user && !isEditing && (
               <button onClick={() => { setEditUsername(user?.username || ''); setIsEditing(true); }}>
-                <Edit2 size={16} className="text-zinc-400" />
+                <Edit2 size={16} className="text-zinc-400 hover:text-cyan-500 transition-colors" />
               </button>
             )}
           </div>
@@ -914,12 +521,15 @@ export default function SpeedcamHUD() {
 
       {/* 3-dot Menu */}
       {showMenu && (
-        <div className="absolute top-16 right-16 z-[1001] bg-black/95 border border-white/10 rounded-xl p-2 w-48 backdrop-blur-xl">
-          <button onClick={() => { setActiveTab('hud'); setShowMenu(false); }} className="w-full text-left px-4 py-3 hover:bg-white/10 rounded-lg text-sm flex items-center gap-3"><Target size={16} /> HUD</button>
-          <button onClick={() => { setActiveTab('dashboard'); setShowMenu(false); }} className="w-full text-left px-4 py-3 hover:bg-white/10 rounded-lg text-sm flex items-center gap-3"><BarChart3 size={16} /> Dashboard</button>
-          <button onClick={() => { setPinMode(true); setActiveTab('add'); setShowMenu(false); }} className="w-full text-left px-4 py-3 hover:bg-white/10 rounded-lg text-sm flex items-center gap-3"><Plus size={16} /> Add Camera</button>
-          <button onClick={() => { setShowSettings(true); setShowMenu(false); }} className="w-full text-left px-4 py-3 hover:bg-white/10 rounded-lg text-sm flex items-center gap-3"><Gauge size={16} /> Settings</button>
-          <button onClick={() => { router.push('/about'); setShowMenu(false); }} className="w-full text-left px-4 py-3 hover:bg-white/10 rounded-lg text-sm flex items-center gap-3"><Info size={16} /> About</button>
+        <div className={`absolute top-16 right-16 z-[1001] border rounded-xl p-2 w-48 backdrop-blur-xl shadow-2xl transition-all ${theme==='night' ? 'bg-black/95 border-white/10' : 'bg-white/95 border-zinc-200'}`}>
+          <button onClick={() => { setActiveTab('hud'); setShowMenu(false); }} className={`w-full text-left px-4 py-3 rounded-lg text-sm flex items-center gap-3 transition-colors ${theme==='night' ? 'hover:bg-white/10 text-white' : 'hover:bg-zinc-100 text-zinc-900'}`}><Target size={16} className={theme==='night'?'text-cyan-400':'text-blue-600'} /> HUD</button>
+          <button onClick={() => { setIs3DActive(!is3DActive); setShowMenu(false); }} className={`w-full text-left px-4 py-3 rounded-lg text-sm flex items-center gap-3 transition-colors ${theme==='night' ? 'hover:bg-white/10 text-white' : 'hover:bg-zinc-100 text-zinc-900'}`}>
+            <Box size={16} className={is3DActive ? 'text-cyan-400' : 'text-zinc-500'} /> 
+            3D Map {is3DActive ? <span className="text-[8px] bg-cyan-500/20 px-1 rounded text-cyan-400 ml-auto">ON</span> : <span className="text-[8px] bg-zinc-500/20 px-1 rounded text-zinc-500 ml-auto">OFF</span>}
+          </button>
+          <button onClick={() => { setPinMode(true); setActiveTab('add'); setShowMenu(false); }} className={`w-full text-left px-4 py-3 rounded-lg text-sm flex items-center gap-3 transition-colors ${theme==='night' ? 'hover:bg-white/10 text-white' : 'hover:bg-zinc-100 text-zinc-900'}`}><Plus size={16} className={theme==='night'?'text-emerald-400':'text-emerald-600'} /> Add Camera</button>
+          <button onClick={() => { setShowSettings(true); setShowMenu(false); }} className={`w-full text-left px-4 py-3 rounded-lg text-sm flex items-center gap-3 transition-colors ${theme==='night' ? 'hover:bg-white/10 text-white' : 'hover:bg-zinc-100 text-zinc-900'}`}><Gauge size={16} className={theme==='night'?'text-cyan-400':'text-blue-600'} /> Settings</button>
+          <button onClick={() => { router.push('/about'); setShowMenu(false); }} className={`w-full text-left px-4 py-3 rounded-lg text-sm flex items-center gap-3 transition-colors ${theme==='night' ? 'hover:bg-white/10 text-white' : 'hover:bg-zinc-100 text-zinc-900'}`}><Info size={16} className={theme==='night'?'text-blue-400':'text-indigo-600'} /> About</button>
         </div>
       )}
 
@@ -933,104 +543,75 @@ export default function SpeedcamHUD() {
               <input type="range" min="100" max="2000" step="50" value={alertDistance} onChange={(e) => setAlertDistance(parseInt(e.target.value))} className="w-full" />
               <div className="flex justify-between text-[10px] mt-1"><span>{alertDistance}m</span><span className="text-cyan-400">{Math.round(alertDistance/1000 * 10)/10}km</span></div>
             </div>
+            <div className="flex items-center justify-between">
+              <span className="text-xs">3D Map</span>
+              <button 
+                onClick={() => setIs3DActive(!is3DActive)} 
+                className={`px-3 py-1 rounded-full text-xs transition-all ${is3DActive ? 'bg-cyan-500 text-black font-bold' : 'bg-white/10 text-white'}`}
+              >
+                {is3DActive ? 'ON' : 'OFF'}
+              </button>
+            </div>
             <div className="flex items-center justify-between"><span className="text-xs">Audio</span><button onClick={() => setAudioEnabled(!audioEnabled)} className={`p-2 rounded-full ${audioEnabled ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>{audioEnabled ? <Volume2 size={16} /> : <VolumeX size={16} />}</button></div>
             <div className="flex items-center justify-between"><span className="text-xs">Language</span><button onClick={() => setLanguage(prev => prev === 'english' ? 'hindi' : 'english')} className="px-3 py-1 bg-white/10 rounded-full text-xs">{language === 'english' ? 'EN' : 'हि'}</button></div>
           </div>
         </div>
       )}
 
-      {/* Map (unchanged) */}
+      {/* Main Map Area */}
       <div className="absolute inset-0 z-0">
-        <MapContainer center={myLoc} zoom={17} zoomControl={false} className="h-full w-full">
-          <TileLayer url="https://{s}.google.com/vt/lyrs=m,h&x={x}&y={y}&z={z}" subdomains={['mt0','mt1','mt2','mt3']} className="google-dark-engine" />
-          <MapController coords={myLoc} zoom={speed > 60 ? 15 : 17} isLocked={isLocked} routeBounds={routeBounds} />
-          <MapClickHandler onMapClick={handleMapClick} />
-          {route.length > 0 && (
-            <>
-              <Polyline positions={route} pathOptions={{ color: COLORS.sky, weight: 12, opacity: 0.15 }} />
-              <Polyline positions={route} pathOptions={{ color: COLORS.sky, weight: 6, opacity: 0.4 }} />
-              <Polyline positions={route} pathOptions={{ color: '#ffffff', weight: 4, opacity: 0.9, dashArray: '10, 15', className: 'animate-pulse' }} />
-            </>
-          )}
-          <Marker position={myLoc} icon={carIcon(heading, overspeedAlert)} />
-          {targetCoords && <Marker position={targetCoords} icon={routeDistance ? routeTargetIcon(routeDistance, routeDuration) : destIcon} />}
-          {tempPin && (
-            <Marker
-              position={tempPin}
-              icon={pinIcon(true)}
-              draggable={true}
-              eventHandlers={{
-                dragend: (e) => {
-                  const { lat, lng } = e.target.getLatLng();
-                  setTempPin([lat, lng]);
-                }
-              }}
-            >
-              <Tooltip direction="top" offset={[0, -20]} opacity={1} permanent>
-                <span className="text-xs font-bold">{language === 'hindi' ? 'नया कैमरा – खींचकर एडजस्ट करें' : 'New Camera – Drag to adjust'}</span>
-              </Tooltip>
-            </Marker>
-          )}
-          {/* Speed Cameras Loop */}
-          {allCameras.filter(cam => cam && cam.lat !== undefined && cam.lng !== undefined && cam.type !== 'red' && cam.type !== 'redlight').map(cam => {
-            let onRoute = false;
-            if (route && route.length > 0) {
-              const R = 6371e3;
-              for (let i = 0; i < route.length; i+=5) {
-                const lat1 = cam.lat * Math.PI / 180;
-                const lat2 = route[i][0] * Math.PI / 180;
-                const dLat = (route[i][0] - cam.lat) * Math.PI / 180;
-                const dLon = (route[i][1] - cam.lng) * Math.PI / 180;
-                const a = Math.sin(dLat/2) * Math.sin(dLat/2) + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon/2) * Math.sin(dLon/2);
-                if (R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)) < 150) {
-                  onRoute = true;
-                  break;
-                }
-              }
-            }
-            return (
-            <Marker
-              key={cam.id}
-              position={[cam.lat, cam.lng]}
-              icon={radarIcon(cam.speedLimit, crossedSet.current.has(cam.id), nextCam?.id === cam.id, cam.isSuspicious, cam.type, onRoute)}
-              eventHandlers={{ click: () => { setSelectedCamera(cam); setShowCameraInfo(true); } }}
+        {/* Primary Map */}
+        <div className="absolute inset-0">
+          {!is3DActive ? (
+            <Map2D 
+              key={`${displayCameras.length}_${theme}_${isLocked}`}
+              coords={myLoc} 
+              zoom={speed > 80 ? 14 : 17} 
+              theme={theme} 
+              cameras={displayCameras} 
+              route={route} 
+              heading={heading} 
+              nextCam={nextCam}
+              overspeedAlert={overspeedAlert}
+              isLocked={isLocked}
+              routeBounds={routeBounds}
+              onMapClick={handleMapClick}
+              destination={targetCoords}
+              routeDistance={routeDistance}
+              routeDuration={routeDuration}
+              pinMode={pinMode}
+              tempPin={tempPin}
+              selectedCamera={selectedCamera}
+              crossedSet={crossedSet}
+              language={language}
+              onMarkerClick={handleMarkerClick}
             />
-            );
-          })}
-
-          {/* Red Light Cameras Loop */}
-          {allCameras.filter(cam => cam && cam.lat !== undefined && cam.lng !== undefined && (cam.type === 'red' || cam.type === 'redlight')).map(cam => {
-            let onRoute = false;
-            if (route && route.length > 0) {
-              const R = 6371e3;
-              for (let i = 0; i < route.length; i+=5) {
-                const lat1 = cam.lat * Math.PI / 180;
-                const lat2 = route[i][0] * Math.PI / 180;
-                const dLat = (route[i][0] - cam.lat) * Math.PI / 180;
-                const dLon = (route[i][1] - cam.lng) * Math.PI / 180;
-                const a = Math.sin(dLat/2) * Math.sin(dLat/2) + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon/2) * Math.sin(dLon/2);
-                if (R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)) < 150) {
-                  onRoute = true;
-                  break;
-                }
-              }
-            }
-            const isAlert = selectedCameras.some(c => c.id === cam.id);
-            return (
-            <Marker
-              key={cam.id}
-              position={[cam.lat, cam.lng]}
-              icon={redLightIcon(cam.isSuspicious, onRoute, isAlert)}
-              eventHandlers={{ click: () => { setSelectedCamera(cam); setShowCameraInfo(true); } }}
+          ) : (
+            <Mappa3D 
+              coords={myLoc} 
+              zoom={17} 
+              theme={theme} 
+              cameras={displayCameras} 
+              route={route} 
+              heading={heading} 
+              nextCam={nextCam}
+              overspeedAlert={overspeedAlert}
+              destination={targetCoords}
+              onMapClick={handleMapClick}
+              pinMode={pinMode}
+              tempPin={tempPin}
+              routeDistance={routeDistance}
+              routeDuration={routeDuration}
+              isLocked={isLocked}
+              onMarkerClick={handleMarkerClick}
             />
-            );
-          })}
-        </MapContainer>
+          )}
+        </div>
       </div>
 
       {/* Alerts Stack (unchanged) */}
       <div className="absolute top-20 left-0 right-0 z-[2000] flex flex-col items-center gap-2 pointer-events-none">
-        {alerts.map(alert => <AlertItem key={alert.id} alert={alert} onRemove={removeAlert} />)}
+        {alerts.map(alert => <AlertItem key={alert.id} alert={alert} onRemove={removeAlert} theme={theme} />)}
       </div>
 
       {/* Pin Mode Indicator (unchanged) */}
@@ -1041,22 +622,60 @@ export default function SpeedcamHUD() {
       )}
 
       {/* Bottom Sheet */}
-      <div className="absolute bottom-0 inset-x-0 z-[1000] backdrop-blur-xl border-t border-cyan-500/20 rounded-t-3xl transition-all duration-500 ease-in-out overflow-hidden" style={{ height: sheetHeight, background: 'linear-gradient(to bottom, rgba(5,7,12,0.97) 0%, rgba(0,0,0,0.98) 100%)' }}>
+      <div 
+        className={`absolute bottom-0 inset-x-0 z-[1000] backdrop-blur-xl border-t transition-all duration-500 ease-in-out overflow-hidden rounded-t-[2.5rem] ${theme === 'night' ? 'border-cyan-500/20 shadow-[0_-10px_40px_rgba(0,0,0,0.5)]' : 'border-zinc-200 shadow-[0_-10px_30px_rgba(0,0,0,0.1)]'}`} 
+        style={{ 
+          height: sheetHeight, 
+          background: theme === 'night' 
+            ? 'linear-gradient(to bottom, rgba(5,7,12,0.98) 0%, rgba(0,0,0,1) 100%)' 
+            : 'linear-gradient(to bottom, rgba(255,255,255,0.96) 0%, rgba(248,250,252,0.98) 100%)' 
+        }}
+      >
         {/* Top inset glow line */}
-        <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-cyan-500/40 to-transparent" />
-        <div className="flex justify-center pt-2.5 pb-1">
-          <button onClick={cycleSheetHeight} className="bottom-sheet-handle w-10 h-1 rounded-full hover:opacity-80 transition-opacity" />
+        {theme === 'night' && <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-cyan-500/40 to-transparent" />}
+        <div className="flex justify-center pt-3 pb-1">
+          <button 
+            onClick={cycleSheetHeight} 
+            className={`w-12 h-1.5 rounded-full transition-all duration-300 ${theme === 'night' ? 'bg-cyan-500/30 hover:bg-cyan-500/60' : 'bg-zinc-300 hover:bg-zinc-400'}`} 
+          />
         </div>
-        <div className="overflow-y-auto h-full px-4 pb-4">
+        <div className="overflow-y-auto h-full px-4 pb-4 scrollbar-none">
           {activeTab === 'add' && !submitSuccess ? (
-            // Add Camera Form (unchanged)
             <div className="py-2">
-              <h2 className="text-xl font-black mb-4">{language === 'hindi' ? 'कैमरा जोड़ें' : 'ADD CAMERA'}</h2>
-              <div className={`p-4 rounded-xl border-2 text-center mb-4 ${tempPin ? 'bg-green-500/20 border-green-500' : 'bg-yellow-500/20 border-yellow-500'}`}>
+              <h2 className="text-xl font-black mb-4 flex items-center gap-3">
+                <Camera className="text-cyan-400" />
+                {language === 'hindi' ? 'कैमरा जोड़ें' : 'CONTRIBUTE DATA'}
+              </h2>
+              
+              <div className={`p-5 rounded-2xl border-2 transition-all duration-300 ${tempPin ? 'bg-emerald-500/10 border-emerald-500' : 'bg-yellow-500/10 border-yellow-500 animate-pulse'}`}>
                 {tempPin ? (
-                  <div className="flex items-center justify-center gap-2"><MapPin className="text-green-400" size={20} /><span className="text-green-400 font-bold">{language === 'hindi' ? 'स्थान चयनित!' : 'Location pinned!'}</span></div>
+                  <div className="flex flex-col gap-1">
+                    <div className="flex items-center gap-2">
+                      <CheckCircle className="text-emerald-400" size={18} />
+                      <span className="text-emerald-400 font-black uppercase text-xs">{language === 'hindi' ? 'स्थान चयनित!' : 'LOCATION LOCKED'}</span>
+                    </div>
+                    <span className="text-[9px] text-zinc-500 font-mono italic">COORD: {tempPin[0].toFixed(4)}, {tempPin[1].toFixed(4)}</span>
+                    <button 
+                      onClick={() => setPinMode(true)} 
+                      className="mt-3 py-2 px-4 bg-zinc-800 hover:bg-zinc-700 rounded-xl text-[9px] font-black uppercase tracking-widest text-zinc-300 w-fit transition-all"
+                    >
+                      {language === 'hindi' ? 'स्थान बदलें' : 'Change Location'}
+                    </button>
+                  </div>
                 ) : (
-                  <div className="flex items-center justify-center gap-2"><MapPin className="text-yellow-400 animate-pulse" size={20} /><span className="text-yellow-400">{language === 'hindi' ? 'कैमरा लगाने के लिए मैप पर टैप करें' : 'Tap map to pin location'}</span></div>
+                  <div className="flex flex-col items-center gap-3 py-4">
+                    <MapPin className="text-yellow-400" size={32} />
+                    <div className="text-center">
+                      <span className="text-yellow-400 font-black block uppercase text-xs mb-1">{language === 'hindi' ? 'स्थान चुनें' : 'SELECT POINT'}</span>
+                      <p className="text-[10px] text-zinc-500 uppercase tracking-widest">{language === 'hindi' ? 'कैमरा लगाने के लिए मैप पर टैप करें' : 'Tap anywhere on map to pin radar'}</p>
+                    </div>
+                    <button 
+                      onClick={() => setPinMode(true)}
+                      className={`px-8 py-3 rounded-full text-[11px] font-black uppercase tracking-widest transition-all ${pinMode ? 'bg-cyan-500 text-black animate-pulse' : 'bg-white text-black hover:scale-105'}`}
+                    >
+                      {pinMode ? (language === 'hindi' ? 'मैप पर टैप करें...' : 'TAP MAP NOW...') : (language === 'hindi' ? 'अंक लगाना शुरू करें' : 'ACTIVATE PIN MODE')}
+                    </button>
+                  </div>
                 )}
               </div>
               <div className="space-y-4 mb-6">
@@ -1126,138 +745,32 @@ export default function SpeedcamHUD() {
           ) : (
             // Premium HUD content
             <>
-              {/* Speed + Heading Row */}
-              <div className="flex items-center justify-between mb-4">
-                {/* Compass */}
-                <div className="flex items-center gap-3">
-                  <div className="relative w-14 h-14">
-                    <div className="absolute inset-0 rounded-full border border-cyan-500/20" />
-                    <div className="absolute inset-1 rounded-full border border-cyan-500/10" />
-                    <div className="absolute inset-0 rounded-full" style={{background:'conic-gradient(from 0deg, transparent 0deg, rgba(0,242,255,0.08) 60deg, transparent 120deg)'}} />
-                    <Navigation
-                      style={{ transform: `rotate(${heading}deg)` }}
-                      className="absolute inset-0 m-auto text-cyan-400 w-7 h-7 transition-transform duration-500 drop-shadow-[0_0_6px_rgba(0,242,255,0.8)]"
-                    />
-                  </div>
-                  <div>
-                    <div className="text-[9px] text-zinc-500 uppercase tracking-widest">Heading</div>
-                    <div className="text-xl font-black tabular-nums">{heading}°</div>
-                  </div>
-                </div>
-                {/* Speed */}
-                <div className="text-right">
-                  <div className="text-[9px] text-zinc-500 uppercase tracking-widest">Speed</div>
-                  <div className={`text-5xl font-black tabular-nums leading-none transition-colors duration-300 ${overspeedAlert ? 'text-red-500 drop-shadow-[0_0_20px_rgba(239,68,68,0.8)]' : 'text-white drop-shadow-[0_0_10px_rgba(255,255,255,0.2)]'}`}>
-                    {speed}
-                  </div>
-                  <div className="text-[10px] font-bold text-yellow-500 tracking-widest">KM/H</div>
-                </div>
-              </div>
+              <Speedometer speed={speed} heading={heading} overspeedAlert={overspeedAlert} theme={theme} />
+              
+              <MapStats 
+                tripDistance={tripDistance} 
+                relevantCamerasCount={relevantCameras.length} 
+                crossedCount={crossedCount} 
+                theme={theme} 
+              />
+              
+              <RouteInfo 
+                routeDistance={routeDistance} 
+                routeDuration={routeDuration} 
+                theme={theme} 
+              />
 
-              {/* Stats Grid */}
-              <div className="grid grid-cols-3 gap-2 mb-4">
-                {[
-                  { label: 'TRIP', value: `${(tripDistance/1000).toFixed(2)}`, unit: 'km', color: 'text-cyan-400', glow: 'shadow-[inset_0_0_20px_rgba(0,242,255,0.05)]' },
-                  { label: 'CAMS', value: relevantCameras.length, unit: '', color: 'text-yellow-400', glow: 'shadow-[inset_0_0_20px_rgba(250,204,21,0.05)]' },
-                  { label: 'PASSED', value: crossedCount, unit: '', color: 'text-emerald-400', glow: 'shadow-[inset_0_0_20px_rgba(52,211,153,0.05)]' },
-                ].map(s => (
-                  <div key={s.label} className={`bg-zinc-900/80 border border-white/5 rounded-xl p-2.5 text-center ${s.glow}`}>
-                    <div className="text-[8px] text-zinc-500 uppercase tracking-[2px] mb-1">{s.label}</div>
-                    <div className={`text-base font-black tabular-nums ${s.color}`}>{s.value}<span className="text-[10px] opacity-60 ml-0.5">{s.unit}</span></div>
-                  </div>
-                ))}
-              </div>
-
-              {/* Route Info */}
-              {routeDistance && routeDuration ? (
-                <div className="bg-gradient-to-r from-cyan-950/40 to-blue-950/40 rounded-2xl p-4 mb-3 flex justify-around items-center border border-cyan-500/20 shadow-[0_0_20px_rgba(0,242,255,0.07)]">
-                  <div className="text-center">
-                    <div className="text-[9px] text-zinc-400 uppercase tracking-[2px] mb-1">Route</div>
-                    <div className="text-2xl font-black text-cyan-400 tabular-nums">{routeDistance}<span className="text-xs ml-1 opacity-60">km</span></div>
-                  </div>
-                  <div className="w-px h-8 bg-white/10" />
-                  <div className="text-center">
-                    <div className="text-[9px] text-zinc-400 uppercase tracking-[2px] mb-1">ETA</div>
-                    <div className="text-2xl font-black text-yellow-400 tabular-nums">{routeDuration}<span className="text-xs ml-1 opacity-60">min</span></div>
-                  </div>
-                </div>
-              ) : null}
-
-              {/* Next Camera */}
-              {nextCam && (
-                <div className="relative overflow-hidden bg-zinc-900/60 border border-white/8 rounded-2xl p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
-                  <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-cyan-500/30 to-transparent" />
-                  <div className="flex justify-between items-center">
-                    <div className="flex-1 min-w-0">
-                      <div className="text-[9px] text-zinc-500 uppercase tracking-[2px] mb-0.5">Next Camera</div>
-                      <div className="text-sm font-black truncate">{nextCam.name}</div>
-                      <div className="text-[11px] text-cyan-400 mt-0.5">
-                        {Math.round(nextCam.d)}m away &bull; {nextCam.type === 'red' ? '🔴 Red Light' : `⚡ ${nextCam.speedLimit} km/h limit`}
-                      </div>
-                    </div>
-                    {nextCam.type !== 'red' && (
-                      <div className={`ml-3 px-3 py-1.5 rounded-xl text-xs font-black tracking-wider shrink-0 ${
-                        speed > nextCam.speedLimit
-                          ? 'bg-red-600 shadow-[0_0_15px_rgba(239,68,68,0.4)] text-white'
-                          : 'bg-emerald-700/80 text-emerald-200'
-                      }`}>
-                        {speed > nextCam.speedLimit ? 'OVER' : 'SAFE'}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
+              <NextCameraInfo 
+                nextCam={nextCam} 
+                speed={speed} 
+                theme={theme} 
+              />
             </>
           )}
         </div>
       </div>
 
-      {/* Camera Info Modal (unchanged) */}
-      {showCameraInfo && selectedCamera && (
-        <CameraInfoPanel camera={selectedCamera} onClose={() => { setShowCameraInfo(false); setSelectedCamera(null); }} />
-      )}
-
-      {/* Report Modal (unchanged) */}
-      {showReportModal && reportingCamera && (
-        <div className="fixed inset-0 z-[3000] bg-black/90 flex items-center justify-center p-4">
-          <div className="bg-zinc-900 rounded-2xl border border-red-500/30 w-full max-w-md p-6">
-            <h3 className="text-xl font-black mb-4 flex items-center gap-2">
-              <AlertTriangle className="text-red-400" size={20} />
-              {language === 'hindi' ? 'फेक कैमरा रिपोर्ट करें' : 'Report Fake Camera'}
-            </h3>
-            <p className="text-sm text-zinc-400 mb-4">
-              {language === 'hindi' 
-                ? `आप ${reportingCamera.name} को रिपोर्ट कर रहे हैं।` 
-                : `You are reporting ${reportingCamera.name}.`}
-            </p>
-            <textarea
-              className="w-full bg-black/50 border border-zinc-700 rounded-lg p-3 text-sm focus:border-red-500 outline-none mb-4"
-              placeholder={language === 'hindi' ? 'कारण (वैकल्पिक)' : 'Reason (optional)'}
-              rows="3"
-              value={reportReason}
-              onChange={(e) => setReportReason(e.target.value)}
-            />
-            <div className="flex gap-3">
-              <button
-                onClick={handleReport}
-                className="flex-1 bg-red-600 hover:bg-red-500 py-3 rounded-lg font-bold"
-              >
-                {language === 'hindi' ? 'रिपोर्ट भेजें' : 'Submit Report'}
-              </button>
-              <button
-                onClick={() => {
-                  setShowReportModal(false);
-                  setReportReason('');
-                  setReportingCamera(null);
-                }}
-                className="flex-1 bg-zinc-700 hover:bg-zinc-600 py-3 rounded-lg font-bold"
-              >
-                {language === 'hindi' ? 'रद्द करें' : 'Cancel'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Camera Info Modal (Removed in favor of Popups) */}
 
       {/* Overspeed Overlay (unchanged) */}
       {overspeedAlert && (
@@ -1277,16 +790,59 @@ export default function SpeedcamHUD() {
         </div>
       )}
 
-      {/* Privacy Badge (unchanged) */}
-      <div className="absolute bottom-20 right-3 z-[1000] bg-black/60 backdrop-blur-sm border border-cyan-500/30 rounded-full px-3 py-1 text-[8px] text-cyan-400 flex items-center gap-1">
-        <Shield size={10} /> No data stored
+      {/* Audio Protection Button */}
+      {speechBlocked && audioEnabled && (
+        <div className="absolute top-16 right-3 z-[1500] animate-in fade-in zoom-in duration-500">
+          <button 
+            onClick={enableAudioManually}
+            className="bg-red-600 hover:bg-red-500 text-white px-4 py-3 rounded-2xl border-2 border-white shadow-[0_0_30px_rgba(239,68,68,0.5)] flex items-center gap-3 active:scale-95 transition-all"
+          >
+            <Volume2 className="animate-bounce" size={20} />
+            <div className="text-left">
+              <div className="text-[10px] font-black uppercase tracking-tighter leading-none">Audio Restricted</div>
+              <div className="text-[8px] font-bold opacity-80 uppercase tracking-widest mt-0.5">Tap to Enable Alerts</div>
+            </div>
+          </button>
+        </div>
+      )}
+
+      {/* DEBUG INDICATOR */}
+      <div className="absolute top-16 left-3 z-[1500] pointer-events-none">
+        <div className="bg-black/90 px-3 py-1.5 rounded-xl text-[9px] border border-white/10 font-mono flex items-center gap-3 backdrop-blur-xl shadow-2xl">
+          <div className="flex items-center gap-1.5">
+             <Activity size={10} className={allCameras.length > 0 ? "text-cyan-400" : "text-red-500 animate-pulse"} />
+             <span className={allCameras.length > 0 ? "text-cyan-400/90" : "text-red-500"}>ACTIVE: {allCameras.length}</span>
+          </div>
+          {pendingCameras.length > 0 && (
+            <>
+              <div className="h-2 w-px bg-white/10" />
+              <div className="flex items-center gap-1.5">
+                <Clock size={10} className="text-yellow-500 animate-pulse" />
+                <span className="text-yellow-500/90">{user?.isAdmin ? 'ALL_PENDING' : 'MY_PENDING'}: {pendingCameras.length}</span>
+              </div>
+            </>
+          )}
+          <div className="h-2 w-px bg-white/10" />
+          <div className="flex items-center gap-1.5">
+             <LocateFixed size={10} className={myLoc[0] !== 18.5204 ? 'text-emerald-500' : 'text-orange-500 animate-bounce'} />
+             <span className="text-zinc-400">GPS: {myLoc[0].toFixed(3)},{myLoc[1].toFixed(3)} {myLoc[0] === 18.5204 ? '(PUNE_DEFAULT)' : '(LIVE)'}</span>
+          </div>
+          <div className="h-2 w-px bg-white/10" />
+          <div className="flex items-center gap-1.5 ml-1">
+             <div className="w-1.5 h-1.5 bg-red-600 rounded-full animate-pulse shadow-[0_0_8px_red]" />
+             <span className="text-[8px] font-black text-white/70 uppercase">LIVE_HUD</span>
+          </div>
+        </div>
       </div>
+
+      {/* Camera Reporting UX */}
+      <CameraDetailsSheet />
 
       <style jsx global>{`
         /* === Map Base === */
-        .google-dark-engine { filter: invert(100%) hue-rotate(180deg) brightness(90%) contrast(85%) saturate(80%) !important; }
-        .leaflet-marker-icon:not(.google-dark-engine), .leaflet-pane-overlay-pane { filter: invert(100%) hue-rotate(-180deg) !important; }
-        .leaflet-container { background: #000 !important; }
+        .map-engine-night { filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(90%) saturate(80%) !important; }
+        .map-engine-day { filter: brightness(105%) contrast(100%) saturate(110%) !important; }
+        .leaflet-container { background: transparent !important; }
         .leaflet-control-zoom { display: none !important; }
         .leaflet-control-attribution { display: none !important; }
 

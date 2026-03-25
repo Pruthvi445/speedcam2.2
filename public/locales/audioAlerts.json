@@ -1,0 +1,34 @@
+{
+  "en": {
+    "speed_camera_single": "Speed camera {distance} meters ahead. Your speed {speed} km/h. Limit {limit}.",
+    "speed_camera_multiple": "Caution! {count} speed cameras within 100 meters.",
+    "speed_camera_item": "{index}. Speed camera {distance} meters ahead, limit {limit}.",
+    "red_light_single": "Red light camera {distance} meters ahead. Obey traffic signal.",
+    "red_light_multiple": "Caution! {count} red light cameras within 100 meters.",
+    "red_light_item": "{index}. Red light camera {distance} meters ahead.",
+    "camera_suspicious_prefix": "⚠️ This camera has been reported fake by 5+ users. Proceed with caution. ",
+    "gps_signal_lost": "GPS signal lost or blocked.",
+    "gps_permission_denied": "Please enable location permissions.",
+    "search_failed": "Search failed: {error}",
+    "location_not_found": "Location not found.",
+    "camera_submitted": "Camera submitted! Awaiting review.",
+    "submit_failed": "Submit failed: {error}",
+    "error_generic": "An error occurred."
+  },
+  "hi": {
+    "speed_camera_single": "स्पीड कैमरा {distance} मीटर आगे है। आपकी गति {speed} किमी/घंटा है। सीमा {limit} है।",
+    "speed_camera_multiple": "सावधान! {count} स्पीड कैमरे 100 मीटर के अंदर हैं।",
+    "speed_camera_item": "{index}. स्पीड कैमरा {distance} मीटर आगे, सीमा {limit}।",
+    "red_light_single": "लाल बत्ती कैमरा {distance} मीटर आगे है। ट्रैफिक सिग्नल का पालन करें।",
+    "red_light_multiple": "सावधान! {count} लाल बत्ती कैमरे 100 मीटर के अंदर हैं।",
+    "red_light_item": "{index}. लाल बत्ती कैमरा {distance} मीटर आगे।",
+    "camera_suspicious_prefix": "⚠️ यह कैमरा 5+ यूज़र्स ने फेक रिपोर्ट किया है! सावधानी बरतें। ",
+    "gps_signal_lost": "GPS सिग्नल नहीं मिल रहा है।",
+    "gps_permission_denied": "कृपया लोकेशन परमिशन दें।",
+    "search_failed": "खोज विफल: {error}",
+    "location_not_found": "स्थान नहीं मिला।",
+    "camera_submitted": "कैमरा सफलतापूर्वक सबमिट किया गया! समीक्षा लंबित है।",
+    "submit_failed": "प्रस्तुति विफल: {error}",
+    "error_generic": "एक त्रुटि हुई।"
+  }
+}

@@ -365,42 +365,29 @@ export default function SpeedcamHUD() {
       )}
 
       {/* Top Bar */}
-      <div className={`absolute top-0 inset-x-0 z-[1000] px-3 pt-3 pb-2 flex items-center gap-2 transition-all duration-500 ${theme==='night' ? '' : 'bg-white/40 shadow-sm blur-bg-overlay'}`} style={{background: theme==='night' ? 'linear-gradient(to bottom, rgba(0,0,0,0.92) 0%, rgba(0,0,0,0.6) 60%, transparent 100%)' : undefined, backdropFilter: theme==='night' ? 'blur(0px)' : 'blur(20px)'}}>
+      <div className={`absolute top-0 inset-x-0 z-[1000] px-2 pt-2 md:px-3 md:pt-3 pb-2 flex items-center gap-1.5 md:gap-2 transition-all duration-500 ${theme==='night' ? '' : 'bg-white/40 shadow-sm'}`} style={{background: theme==='night' ? 'linear-gradient(to bottom, rgba(0,0,0,0.92) 0%, rgba(0,0,0,0.6) 60%, transparent 100%)' : undefined, backdropFilter: theme==='night' ? 'blur(0px)' : 'blur(20px)'}}>
         {/* Brand + Lock */}
-        <div className="flex items-center gap-2 shrink-0">
-          <div className={`flex items-center gap-1.5 border rounded-xl px-3 py-1.5 shadow-lg transition-all ${theme==='night' ? 'bg-black/60 border-cyan-500/40' : 'bg-white border-zinc-200'}`}>
-            <Zap size={12} className={theme==='night'?'text-cyan-400':'text-blue-600'} />
-            <span className={`text-[11px] font-black tracking-[2px] ${theme==='night'?'text-cyan-400':'text-zinc-900'}`}>SPEEDCAM</span>
+        <div className="flex items-center gap-1 md:gap-2 shrink-0">
+          <div className={`flex items-center gap-1.5 border rounded-xl px-2 md:px-3 py-2 md:py-1.5 shadow-lg transition-all ${theme==='night' ? 'bg-black/60 border-cyan-500/40' : 'bg-white border-zinc-200'}`}>
+            <Zap size={14} className={theme==='night'?'text-cyan-400':'text-blue-600'} />
+            <span className={`text-[10px] md:text-[11px] font-black tracking-[1px] md:tracking-[2px] ${theme==='night'?'text-cyan-400':'text-zinc-900'} hidden xs:block`}>SPEEDCAM</span>
           </div>
-          <button 
-            onClick={() => setTheme(theme==='night'?'day':'night')} 
-            className={`p-2 rounded-xl border transition-all duration-300 ${theme==='night' ? 'bg-cyan-500/20 border-cyan-500/40 text-cyan-400 shadow-[0_0_12px_rgba(0,242,255,0.2)]' : 'bg-white border-zinc-200 text-blue-600 shadow-md'}`}
-          >
-            {theme==='night' ? <Moon size={16} /> : <Sun size={16} />}
-          </button>
-          <button
-            onClick={() => setIsLocked(!isLocked)}
-            className={`p-2 rounded-xl border transition-all duration-300 ${isLocked ? (theme==='night' ? 'bg-cyan-500/20 border-cyan-500/60 text-cyan-400 shadow-[0_0_10px_rgba(0,242,255,0.2)]' : 'bg-blue-50 border-blue-200 text-blue-600 shadow-sm') : (theme==='night' ? 'bg-black/40 border-white/10 text-zinc-500' : 'bg-white border-zinc-100 text-zinc-400')}`}
-          >
-            <LocateFixed size={16} />
-          </button>
-          <button
-            onClick={() => setIs3DActive(!is3DActive)}
-            className={`p-2 rounded-xl border transition-all duration-300 ${is3DActive ? (theme==='night' ? 'bg-cyan-500/30 border-cyan-400 text-cyan-400 shadow-[0_0_15px_rgba(0,242,255,0.4)]' : 'bg-blue-600 border-blue-600 text-white shadow-lg') : (theme==='night' ? 'bg-black/40 border-white/10 text-zinc-500' : 'bg-white border-zinc-100 text-zinc-400')}`}
-          >
-            <Box size={16} />
-          </button>
           
-          {speechBlocked && (
-            <button
-              onClick={enableAudioManually}
-              className="p-2 rounded-xl border bg-orange-500/20 border-orange-500 text-orange-400 shadow-[0_0_15px_rgba(0,242,255,0.4)] animate-pulse flex items-center gap-2"
-              title="Click to Enable Audio"
+          <div className="flex items-center gap-1">
+            <button 
+              onClick={() => setTheme(theme==='night'?'day':'night')} 
+              className={`p-2 rounded-xl border transition-all duration-300 ${theme==='night' ? 'bg-cyan-500/20 border-cyan-500/40 text-cyan-400' : 'bg-white border-zinc-200 text-blue-600'}`}
             >
-              <VolumeX size={16} />
-              <span className="text-[10px] font-black hidden md:block">ENABLE AUDIO</span>
+              {theme==='night' ? <Moon size={16} /> : <Sun size={16} />}
             </button>
-          )}
+            
+            <button
+              onClick={() => setIsLocked(!isLocked)}
+              className={`p-2 rounded-xl border transition-all duration-300 ${isLocked ? (theme==='night' ? 'bg-cyan-500/20 border-cyan-500/60 text-cyan-400' : 'bg-blue-50 border-blue-200 text-blue-600') : (theme==='night' ? 'bg-black/40 border-white/10 text-zinc-500' : 'bg-white border-zinc-100 text-zinc-400')}`}
+            >
+              <LocateFixed size={16} />
+            </button>
+          </div>
         </div>
         {/* Search */}
         <form onSubmit={handleSearch} className="flex-1 relative">
@@ -430,17 +417,28 @@ export default function SpeedcamHUD() {
             </button>
           )}
         </form>
-        {/* Profile */}
-        <button onClick={() => setShowProfile(!showProfile)} className={`relative p-2 rounded-xl border transition-all ${theme==='night' ? 'bg-black/60 border-white/10 hover:border-cyan-500/40' : 'bg-white/90 border-zinc-200 hover:border-blue-500 shadow-md'}`}>
-          <User size={17} className={user ? (theme==='night'?'text-cyan-400':'text-blue-600') : 'text-zinc-500'} />
-          {unreadCount > 0 && (
-            <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[9px] w-4 h-4 rounded-full flex items-center justify-center font-black shadow-[0_0_8px_rgba(239,68,68,0.6)]">
-              {unreadCount}
-            </span>
-          )}
-        </button>
-        <button onClick={() => setShowMenu(!showMenu)} className={`p-2 rounded-xl border transition-all ${theme==='night' ? 'bg-black/60 border-white/10 hover:border-white/30' : 'bg-white/90 border-zinc-200 hover:bg-zinc-100 shadow-md'}`}>
-          <Menu size={17} className={theme==='night'?'text-white':'text-zinc-900'} /></button>
+        {/* Profile/Actions */}
+        <div className="flex items-center gap-1 md:gap-2 shrink-0">
+          <button 
+            onClick={() => setIs3DActive(!is3DActive)}
+            className={`p-2 rounded-xl border transition-all duration-300 ${is3DActive ? (theme==='night' ? 'bg-cyan-500/30 border-cyan-400 text-cyan-400' : 'bg-blue-600 border-blue-600 text-white') : (theme==='night' ? 'bg-black/40 border-white/10 text-zinc-500' : 'bg-white border-zinc-100 text-zinc-400')}`}
+          >
+            <Box size={16} />
+          </button>
+          
+          <button onClick={() => setShowProfile(!showProfile)} className={`relative p-2 rounded-xl border transition-all ${theme==='night' ? 'bg-black/60 border-white/10' : 'bg-white/90 border-zinc-200 shadow-md'}`}>
+            <User size={17} className={user ? (theme==='night'?'text-cyan-400':'text-blue-600') : 'text-zinc-500'} />
+            {unreadCount > 0 && (
+              <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[9px] w-4 h-4 rounded-full flex items-center justify-center font-black">
+                {unreadCount}
+              </span>
+            )}
+          </button>
+          
+          <button onClick={() => setShowMenu(!showMenu)} className={`p-2 rounded-xl border transition-all ${theme==='night' ? 'bg-black/60 border-white/10' : 'bg-white/90 border-zinc-200 shadow-md'}`}>
+            <Menu size={17} className={theme==='night'?'text-white':'text-zinc-900'} />
+          </button>
+        </div>
       </div>
 
       {/* User Profile Panel */}
@@ -807,8 +805,8 @@ export default function SpeedcamHUD() {
       )}
 
       {/* DEBUG INDICATOR */}
-      <div className="absolute top-16 left-3 z-[1500] pointer-events-none">
-        <div className="bg-black/90 px-3 py-1.5 rounded-xl text-[9px] border border-white/10 font-mono flex items-center gap-3 backdrop-blur-xl shadow-2xl">
+      <div className="absolute top-16 md:top-20 left-1/2 -translate-x-1/2 md:translate-x-0 md:left-3 z-[1500] pointer-events-none w-[95%] md:w-auto">
+        <div className="bg-black/90 px-3 py-1.5 rounded-xl text-[9px] border border-white/10 font-mono flex items-center gap-1.5 md:gap-3 backdrop-blur-xl shadow-2xl justify-center md:justify-start">
           <div className="flex items-center gap-1.5">
              <Activity size={10} className={allCameras.length > 0 ? "text-cyan-400" : "text-red-500 animate-pulse"} />
              <span className={allCameras.length > 0 ? "text-cyan-400/90" : "text-red-500"}>ACTIVE: {allCameras.length}</span>
@@ -818,16 +816,16 @@ export default function SpeedcamHUD() {
               <div className="h-2 w-px bg-white/10" />
               <div className="flex items-center gap-1.5">
                 <Clock size={10} className="text-yellow-500 animate-pulse" />
-                <span className="text-yellow-500/90">{user?.isAdmin ? 'ALL_PENDING' : 'MY_PENDING'}: {pendingCameras.length}</span>
+                <span className="text-yellow-500/90 shrink-0">{user?.isAdmin ? 'ALL' : 'MY'}: {pendingCameras.length}</span>
               </div>
             </>
           )}
-          <div className="h-2 w-px bg-white/10" />
-          <div className="flex items-center gap-1.5">
+          <div className="h-2 w-px bg-white/10 hidden sm:block" />
+          <div className="items-center gap-1.5 hidden sm:flex">
              <LocateFixed size={10} className={myLoc[0] !== 18.5204 ? 'text-emerald-500' : 'text-orange-500 animate-bounce'} />
-             <span className="text-zinc-400">GPS: {myLoc[0].toFixed(3)},{myLoc[1].toFixed(3)} {myLoc[0] === 18.5204 ? '(PUNE_DEFAULT)' : '(LIVE)'}</span>
+             <span className="text-zinc-400">GPS: {myLoc[0].toFixed(2)},{myLoc[1].toFixed(2)}</span>
           </div>
-          <div className="h-2 w-px bg-white/10" />
+          <div className="h-2 w-px bg-white/10 ml-1" />
           <div className="flex items-center gap-1.5 ml-1">
              <div className="w-1.5 h-1.5 bg-red-600 rounded-full animate-pulse shadow-[0_0_8px_red]" />
              <span className="text-[8px] font-black text-white/70 uppercase">LIVE_HUD</span>

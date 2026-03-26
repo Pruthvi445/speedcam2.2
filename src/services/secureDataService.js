@@ -450,7 +450,14 @@ export const SecureDataService = {
       const cameraId = camera.id;
       const cameraName = camera.name || 'Unknown';
 
-      // 1. Save the report with camera name and user info
+      // 1. Check for duplicate report
+      const snapshot = await dbGet(`users/${user.uid}/reports/${cameraId}`);
+      if (snapshot) {
+        console.warn('⚠️ User already reported this camera');
+        return 'already_reported';
+      }
+
+      // 2. Save the report with camera name and user info
       const reportData = {
         cameraId,
         cameraName,
@@ -458,10 +465,18 @@ export const SecureDataService = {
         userName: user.username || 'Anonymous',
         userEmail: user.email || '',
         reason,
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        status: 'pending'
       };
+      
       console.log('Saving report:', reportData);
-      await dbPush('cameras/reports', reportData);
+      const reportId = await dbPush('cameras/reports', reportData);
+
+      // Save to user's personal report history to prevent duplicates
+      await dbUpdate(`users/${user.uid}/reports/${cameraId}`, { 
+        reportId, 
+        timestamp: Date.now() 
+      });
 
       // Save to user activity log
       await SecureDataService.trackUserActivity(user.uid, {
@@ -471,17 +486,6 @@ export const SecureDataService = {
         reason,
         timestamp: Date.now()
       });
-
-      // 2. Update the camera's report count
-      const cameraRef = dbRefFunc(db, `cameras/approved/${cameraId}`);
-      const currentReports = camera.reports || 0;
-      const newReports = currentReports + 1;
-      
-      const updates = { reports: newReports };
-      if (newReports >= 5) {
-        updates.isSuspicious = true;
-      }
-      await update(cameraRef, updates);
 
       console.log('✅ Report submitted successfully');
       return true;
@@ -493,24 +497,64 @@ export const SecureDataService = {
   },
 
   /**
-   * Dismiss a report (admin action)
+   * Confirm a report (admin action) - increments camera report count
    */
-  dismissReport: async (reportId, cameraId) => {
+  confirmReport: async (reportId, cameraId, adminUser) => {
     try {
-      await dbRemove(`cameras/reports/${reportId}`);
+      if (!adminUser?.isAdmin) throw new Error('Unauthorized');
 
+      const report = await dbGet(`cameras/reports/${reportId}`);
+      if (!report) throw new Error('Report not found');
+
+      // 1. Update camera's report count
       const cameraRef = dbRefFunc(db, `cameras/approved/${cameraId}`);
       const cameraSnap = await get(cameraRef);
       if (cameraSnap.exists()) {
         const currentReports = cameraSnap.val().reports || 0;
-        const newReports = Math.max(0, currentReports - 1);
-        await update(cameraRef, { reports: newReports });
-        if (newReports < 5) {
-          await update(cameraRef, { isSuspicious: false });
+        const newReports = currentReports + 1;
+        
+        const updates = { reports: newReports };
+        if (newReports >= 5) {
+          updates.isSuspicious = true;
+        }
+        await update(cameraRef, updates);
+      }
+
+      // 2. Mark report as confirmed
+      await dbUpdate(`cameras/reports/${reportId}`, { status: 'confirmed' });
+      await SecureDataService.logAdminAction('confirm_report', { reportId, cameraId, adminId: adminUser.uid });
+      
+      return true;
+    } catch (e) {
+      console.error('Confirm report error:', e);
+      return false;
+    }
+  },
+
+  /**
+   * Dismiss a report (admin action)
+   */
+  dismissReport: async (reportId, cameraId) => {
+    try {
+      const report = await dbGet(`cameras/reports/${reportId}`);
+      const wasConfirmed = report?.status === 'confirmed';
+      
+      await dbRemove(`cameras/reports/${reportId}`);
+
+      if (wasConfirmed) {
+        const cameraRef = dbRefFunc(db, `cameras/approved/${cameraId}`);
+        const cameraSnap = await get(cameraRef);
+        if (cameraSnap.exists()) {
+          const currentReports = cameraSnap.val().reports || 0;
+          const newReports = Math.max(0, currentReports - 1);
+          await update(cameraRef, { reports: newReports });
+          if (newReports < 5) {
+            await update(cameraRef, { isSuspicious: false });
+          }
         }
       }
 
-      await SecureDataService.logAdminAction('dismiss_report', { reportId, cameraId });
+      await SecureDataService.logAdminAction('dismiss_report', { reportId, cameraId, wasConfirmed });
       return true;
     } catch (e) {
       console.error('Dismiss report error:', e);

@@ -38,7 +38,7 @@ const routeTargetIcon = (distanceKm, durationMin, theme) => new L.DivIcon({
 const radarIcon = (limit, passed, isNear, isSuspicious, type, theme, reports, isPending = false) => new L.DivIcon({
   className: 'radar-node-premium',
   html: `
-    <div class="${passed ? 'opacity-40 grayscale scale-75' : 'scale-100'} transition-all duration-300">
+    <div class="${(passed || isPending) ? 'opacity-40 grayscale scale-75' : 'scale-100'} transition-all duration-300">
       ${getRadarHTML(limit, isNear, isSuspicious, theme, reports, isPending)}
     </div>
   `,

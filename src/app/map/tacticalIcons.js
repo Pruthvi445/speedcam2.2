@@ -3,10 +3,14 @@
  * Ensures 100% visual parity across different map engines.
  */
 
-export const getRadarHTML = (limit, isNear, isSuspicious, theme, reports = 0) => {
+export const getRadarHTML = (limit, isNear, isSuspicious, theme, reports = 0, isPending = false) => {
   const isHighReport = reports > 3;
   const badgeHTML = reports > 0 
     ? `<div class="absolute -top-2 -right-2 ${isHighReport ? 'bg-red-500 shadow-[0_0_15px_rgba(239,68,68,0.8)] animate-pulse' : 'bg-orange-500 shadow-md'} text-white text-[10px] font-black rounded-full w-5 h-5 flex items-center justify-center z-[100] border border-black">${reports}</div>`
+    : '';
+  
+  const pendingBadge = isPending 
+    ? `<div class="absolute -bottom-2 -left-2 bg-yellow-500 text-black text-[7px] font-black rounded px-1 py-0.5 z-[100] border border-black uppercase tracking-tighter">Moderating</div>`
     : '';
     
   return `
@@ -21,13 +25,18 @@ export const getRadarHTML = (limit, isNear, isSuspicious, theme, reports = 0) =>
     <div class="absolute -inset-1 border-b-2 border-r-2 ${theme === 'night' ? 'border-cyan-400/40' : 'border-blue-400/40'} w-3 h-3 rounded-br-sm ml-auto mt-auto" style="border-color: ${theme === 'night' ? '#22d3ee' : '#3b82f6'};"></div>
     ${isSuspicious ? '<div class="absolute -top-4 -left-2 text-lg drop-shadow-md z-50">⚠️</div>' : ''}
     ${badgeHTML}
+    ${pendingBadge}
   </div>
 `;};
 
-export const getRedLightHTML = (isNear, isSuspicious, theme, reports = 0) => {
+export const getRedLightHTML = (isNear, isSuspicious, theme, reports = 0, isPending = false) => {
   const isHighReport = reports > 3;
   const badgeHTML = reports > 0 
     ? `<div class="absolute -top-2 -right-4 ${isHighReport ? 'bg-red-500 shadow-[0_0_15px_rgba(239,68,68,0.8)] animate-pulse' : 'bg-orange-500 shadow-md'} text-white text-[10px] font-black rounded-full w-5 h-5 flex items-center justify-center z-[100] border border-black">${reports}</div>`
+    : '';
+
+  const pendingBadge = isPending 
+    ? `<div class="absolute -bottom-2 right-0 bg-yellow-500 text-black text-[7px] font-black rounded px-1 py-0.5 z-[100] border border-black uppercase tracking-tighter">PENDING</div>`
     : '';
 
   return `
@@ -44,6 +53,7 @@ export const getRedLightHTML = (isNear, isSuspicious, theme, reports = 0) => {
     </div>
     ${isSuspicious ? '<div class="absolute -top-4 -left-4 text-lg z-50">⚠️</div>' : ''}
     ${badgeHTML}
+    ${pendingBadge}
   </div>
 `};
 

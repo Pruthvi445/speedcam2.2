@@ -126,8 +126,8 @@ export default function StartPage() {
                     Next-Gen Tactical Awareness
                   </div>
                   <h1 className="text-[14vw] sm:text-7xl md:text-8xl lg:text-9xl font-[1000] tracking-tighter uppercase italic leading-[0.8] mb-4 md:mb-6">
-                    <span className="text-white block">SPEED</span>
-                    <span className="bg-gradient-to-r from-cyan-400 via-blue-500 to-indigo-600 bg-clip-text text-transparent">CAM</span>
+                    <span className="text-white block">NAVZY</span>
+                    <span className="bg-gradient-to-r from-cyan-400 via-blue-500 to-indigo-600 bg-clip-text text-transparent">AI</span>
                   </h1>
                   <p className="text-base md:text-lg text-zinc-400 max-w-lg mx-auto lg:mx-0 leading-relaxed font-medium">
                     The world's most advanced tactical driving HUD for mobile. Real-time radar intelligence, AI-driven scanning, and encrypted network synchronization.
@@ -191,7 +191,7 @@ export default function StartPage() {
                   {/* Digital Overlays - Resized for mobile */}
                   <div className="absolute top-4 left-4 md:top-10 md:left-10 flex items-center gap-2 bg-black/60 backdrop-blur-md px-3 md:px-4 py-1.5 md:py-2 rounded-full border border-cyan-500/30">
                     <div className="w-1.5 md:w-2 h-1.5 md:h-2 bg-cyan-500 rounded-full animate-ping" />
-                    <span className="text-[8px] md:text-[10px] font-mono font-black uppercase tracking-tighter">Scanning...</span>
+                    <span className="text-[8px] md:text-[10px] font-mono font-black uppercase tracking-tighter italic">Navzy_Scanning...</span>
                   </div>
 
                   <div className="absolute bottom-4 right-4 md:bottom-10 md:right-10 p-4 md:p-6 bg-black/80 backdrop-blur-xl rounded-2xl md:rounded-3xl border border-white/10 max-w-[140px] md:max-w-[200px]">

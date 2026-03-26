@@ -39,7 +39,7 @@ export default function CameraDetailsSheet() {
     const success = await SecureDataService.reportCamera(selectedCamera, user, finalReason);
     setIsSubmitting(false);
 
-    if (success) {
+    if (success === true) {
       setSubmitSuccess(true);
       if (typeof window !== 'undefined' && window.navigator && window.navigator.vibrate) {
         window.navigator.vibrate(200);
@@ -47,6 +47,9 @@ export default function CameraDetailsSheet() {
       setTimeout(() => {
         closeSheet();
       }, 2000);
+    } else if (success === 'already_reported') {
+      alert("You have already reported this camera. Our team is reviewing the existing report.");
+      closeSheet();
     } else {
       alert("Failed to report camera. Please try again.");
     }

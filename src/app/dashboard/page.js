@@ -318,11 +318,15 @@ export default function AdminDashboard() {
     loadUsers();
   };
 
-  const handleDelete = async (id) => {
-    if (window.confirm('Are you sure you want to delete this camera? This cannot be undone.')) {
-      await SecureDataService.deleteCamera?.(id);
-      loadStats();
-      loadUsers();
+  const handleConfirmReport = async (reportId, cameraId) => {
+    if (window.confirm('Verify and Confirm this report? This will increase the camera\'s count.')) {
+      const success = await SecureDataService.confirmReport?.(reportId, cameraId, user);
+      if (success) {
+        loadStats();
+        loadUsers();
+      } else {
+        alert('Failed to confirm report.');
+      }
     }
   };
 
@@ -471,7 +475,7 @@ export default function AdminDashboard() {
       <header className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-6 mb-12">
         <div>
           <h1 className="text-5xl font-black italic tracking-tighter uppercase group cursor-default">
-            SpeedCam <span className="text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-600">Command</span>
+            Navzy <span className="text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-600">Command</span>
           </h1>
           <p className="text-zinc-500 text-[10px] font-black uppercase tracking-[0.4em] flex items-center gap-2 mt-2">
             <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" /> System_Diagnostics // Authorization: Root_Admin
@@ -712,21 +716,28 @@ export default function AdminDashboard() {
                 Reason: {report.reason}
               </div>
             )}
+            {report.status === 'confirmed' && (
+              <div className="mt-2 text-[8px] font-black uppercase tracking-widest text-emerald-500 bg-emerald-500/10 px-2 py-0.5 rounded-md w-fit border border-emerald-500/20">
+                Verified & Confirmed
+              </div>
+            )}
           </div>
         </div>
 
         <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+          {report.status !== 'confirmed' && (
+            <button 
+              onClick={() => handleConfirmReport(report.id, report.cameraId)} 
+              className="p-3 bg-emerald-600/20 text-emerald-400 rounded-xl hover:bg-emerald-600 hover:text-white transition-all"
+              title="Confirm & Increment Count"
+            >
+              <CheckCircle size={18}/>
+            </button>
+          )}
           <button 
             onClick={() => handleDismissReport(report.id, report.cameraId)} 
-            className="p-3 bg-emerald-500/10 text-emerald-500 rounded-xl hover:bg-emerald-500 hover:text-white transition-all"
-            title="Dismiss Report (decrease camera report count)"
-          >
-            <CheckCircle size={18}/>
-          </button>
-          <button 
-            onClick={() => handleRemoveReportOnly(report.id)} 
-            className="p-3 bg-yellow-500/10 text-yellow-500 rounded-xl hover:bg-yellow-500 hover:text-white transition-all"
-            title="Delete Report Only (Leaves Camera As-Is)"
+            className="p-3 bg-zinc-800 text-zinc-400 rounded-xl hover:bg-zinc-700 hover:text-white transition-all"
+            title="Dismiss / Reject Report"
           >
             <XCircle size={18}/>
           </button>

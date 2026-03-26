@@ -33,6 +33,7 @@ import { MapStats } from './components/MapStats';
 import { RouteInfo } from './components/RouteInfo';
 import { NextCameraInfo } from './components/NextCameraInfo';
 import CameraDetailsSheet from './components/CameraDetailsSheet';
+import { SearchBar } from './components/SearchBar';
 
 
 // --- Speedcam HUD ---
@@ -46,7 +47,6 @@ export default function SpeedcamHUD() {
   const [odo, setOdo] = useState(0);
 
   const [theme, setTheme] = useState('night');
-  const [search, setSearch] = useState('');
   const [route, setRoute] = useState([]);
   const [routeBounds, setRouteBounds] = useState(null);
   const [targetCoords, setTargetCoords] = useState(null);
@@ -169,9 +169,11 @@ export default function SpeedcamHUD() {
 
   // Combine both for map rendering
   const displayCameras = useMemo(() => {
-    // Merge approved and relevant pending
-    return [...allCameras, ...pendingCameras];
-  }, [allCameras, pendingCameras]);
+    // Only show approved cameras (allCameras) on the main map.
+    // Use pendingCameras only if needed for specific admin views or if we want to show 'requests'.
+    // User request: Don't show requests, only show confirmed network cameras.
+    return allCameras;
+  }, [allCameras]);
 
   // Debug check for store state
   useEffect(() => {
@@ -207,25 +209,28 @@ export default function SpeedcamHUD() {
     setIsEditing(false);
   };
 
-  const handleSearch = useCallback(async (e) => {
-    e.preventDefault();
+  const handleSelectLocation = useCallback(async (coords, label) => {
+    if (!coords) {
+      setTargetCoords(null);
+      setRoute([]);
+      setRouteBounds(null);
+      setRouteDistance(null);
+      setRouteDuration(null);
+      setIsLocked(true);
+      return;
+    }
+
+    const [lat, lng] = coords;
+    setTargetCoords([lat, lng]);
+    setIsLocked(false); // Zoom to location
+
     const KEY = process.env.NEXT_PUBLIC_ORS_API_KEY;
     if (!KEY) {
       addLocalAlert('ERROR', 'OpenRouteService API key missing');
       return;
     }
-    try {
-      const geoRes = await fetch(`https://api.openrouteservice.org/geocode/search?api_key=${KEY}&text=${search}&size=1`);
-      if (!geoRes.ok) throw new Error('Geocoding failed');
-      const geo = await geoRes.json();
-      if (!geo.features.length) {
-        addLocalAlert('WARNING', getMessage('location_not_found'));
-        return;
-      }
-      const [lng, lat] = geo.features[0].geometry.coordinates;
-      setTargetCoords([lat, lng]);
-      setIsLocked(true);
 
+    try {
       const routeRes = await fetch(`https://api.openrouteservice.org/v2/directions/driving-car?api_key=${KEY}&start=${myLoc[1]},${myLoc[0]}&end=${lng},${lat}`);
       if (!routeRes.ok) throw new Error('Routing failed');
       const routeData = await routeRes.json();
@@ -250,7 +255,7 @@ export default function SpeedcamHUD() {
       console.error(err);
       addLocalAlert('ERROR', getMessage('search_failed', { error: err.message }));
     }
-  }, [search, myLoc, addLocalAlert, language]);
+  }, [myLoc, addLocalAlert, language]);
 
   const handleMapClick = useCallback((latlng) => {
     dispatch(setSelectedCamera(null)); // Deselect on map click
@@ -368,9 +373,9 @@ export default function SpeedcamHUD() {
       <div className={`absolute top-0 inset-x-0 z-[1000] px-2 pt-2 md:px-3 md:pt-3 pb-2 flex items-center gap-1.5 md:gap-2 transition-all duration-500 ${theme==='night' ? '' : 'bg-white/40 shadow-sm'}`} style={{background: theme==='night' ? 'linear-gradient(to bottom, rgba(0,0,0,0.92) 0%, rgba(0,0,0,0.6) 60%, transparent 100%)' : undefined, backdropFilter: theme==='night' ? 'blur(0px)' : 'blur(20px)'}}>
         {/* Brand + Lock */}
         <div className="flex items-center gap-1 md:gap-2 shrink-0">
-          <div className={`flex items-center gap-1.5 border rounded-xl px-2 md:px-3 py-2 md:py-1.5 shadow-lg transition-all ${theme==='night' ? 'bg-black/60 border-cyan-500/40' : 'bg-white border-zinc-200'}`}>
-            <Zap size={14} className={theme==='night'?'text-cyan-400':'text-blue-600'} />
-            <span className={`text-[10px] md:text-[11px] font-black tracking-[1px] md:tracking-[2px] ${theme==='night'?'text-cyan-400':'text-zinc-900'} hidden xs:block`}>SPEEDCAM</span>
+          <div className={`flex items-center gap-1.5 border rounded-xl px-2 md:px-3 py-1 md:py-1.5 shadow-lg transition-all ${theme==='night' ? 'bg-black/60 border-cyan-500/40' : 'bg-white border-zinc-200'}`}>
+            <img src="/icon.png" alt="Navzy" className="w-6 h-6 rounded-md object-cover" />
+            <span className={`text-[10px] md:text-[11px] font-black tracking-[1px] md:tracking-[2px] ${theme==='night'?'text-cyan-400':'text-zinc-900'} hidden xs:block uppercase`}>NAVZY</span>
           </div>
           
           <div className="flex items-center gap-1">
@@ -390,33 +395,14 @@ export default function SpeedcamHUD() {
           </div>
         </div>
         {/* Search */}
-        <form onSubmit={handleSearch} className="flex-1 relative">
-          <Search className={`absolute left-3 top-1/2 -translate-y-1/2 ${theme==='night'?'text-cyan-500/70':'text-blue-500/70'}`} size={15} />
-          <input
-            className={`w-full border rounded-xl py-2 pl-9 pr-4 text-xs outline-none transition-all duration-300 placeholder:text-zinc-600 ${theme==='night' ? 'bg-black/70 border-white/10 focus:border-cyan-500/70 focus:bg-black/90 text-white' : 'bg-white/90 border-zinc-200 focus:border-blue-500 text-zinc-900 shadow-lg'}`}
-            style={{backdropFilter:'blur(12px)'}}
-            placeholder={language === 'hindi' ? 'गंतव्य खोजें...' : 'Search destination...'}
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-          />
-          {(search || targetCoords) && (
-            <button
-              type="button"
-              onClick={() => {
-                setSearch('');
-                setTargetCoords(null);
-                setRoute([]);
-                setRouteBounds(null);
-                setRouteDistance(null);
-                setRouteDuration(null);
-                setIsLocked(true);
-              }}
-              className={`absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-full hover:bg-white/10 ${theme==='night'?'text-cyan-500':'text-blue-500'}`}
-            >
-              <X size={14} />
-            </button>
-          )}
-        </form>
+        <SearchBar 
+          theme={theme}
+          language={language}
+          myLoc={myLoc}
+          onSelectLocation={handleSelectLocation}
+          addLocalAlert={addLocalAlert}
+          getMessage={getMessage}
+        />
         {/* Profile/Actions */}
         <div className="flex items-center gap-1 md:gap-2 shrink-0">
           <button 

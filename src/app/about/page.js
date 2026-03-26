@@ -78,7 +78,7 @@ export default function AboutPage() {
           </motion.div>
           
           <motion.h1 variants={itemVars} className="text-[12vw] md:text-[9vw] font-black leading-[0.8] tracking-tighter uppercase italic mb-8">
-            SPEED<span className="text-transparent bg-clip-text bg-gradient-to-b from-white to-zinc-800">CAM</span>
+            NAVZY<span className="text-transparent bg-clip-text bg-gradient-to-b from-white to-zinc-800">.AI</span>
           </motion.h1>
 
           <motion.div variants={itemVars} className="grid md:grid-cols-2 gap-12">
@@ -108,7 +108,7 @@ export default function AboutPage() {
                 </h3>
                 <h2 className="text-4xl font-black uppercase italic mb-6">Live Tactical <br/>Dashboard</h2>
                 <p className="text-zinc-400 text-sm leading-relaxed mb-8">
-                  SpeedCam utilizes a dual-engine architecture (2D/3D) to provide sub-meter accuracy for upcoming hazards. Our **LIVE_HUD** technology synchronizes telemetry data with OSM vector tiles to predict safe speeds and identify mobile interceptors before you see them.
+                  Navzy utilizes a dual-engine architecture (2D/3D) to provide sub-meter accuracy for upcoming hazards. Our **LIVE_HUD** technology synchronizes telemetry data with OSM vector tiles to predict safe speeds and identify mobile interceptors before you see them.
                 </p>
                 <div className="flex flex-wrap gap-4">
                     {['3KM_Scannner', 'Voice_Synthesis_Alerts', 'Night_Mode_Tactical', 'Triangulated_GPS'].map((tag) => (
@@ -189,7 +189,7 @@ export default function AboutPage() {
               Command <br/> The Road.
             </h2>
             <p className="text-sm font-black uppercase tracking-widest mb-12 opacity-80 max-w-lg leading-relaxed">
-              Activate the SpeedCam Protocol. Access real-time sensor data, voice alerts, and spatial analytics for the ultimate transit experience.
+              Activate the Navzy Protocol. Access real-time sensor data, voice alerts, and spatial analytics for the ultimate transit experience.
             </p>
             
             <div className="flex flex-col md:flex-row gap-6">
@@ -206,7 +206,7 @@ export default function AboutPage() {
         {/* 7. FOOTER */}
         <footer className="mt-32 pt-12 border-t border-white/5 flex flex-col md:flex-row justify-between items-center gap-8 text-[10px] font-bold text-zinc-600 uppercase tracking-[0.3em]">
           <div className="flex flex-col gap-2">
-            <span>© 2026 SPEEDCAM COMMAND PROTOCOL</span>
+            <span>© 2026 NAVZY COMMAND PROTOCOL</span>
             <span className="text-zinc-800">BASE_OF_OPERATIONS: PUNE_HUB</span>
           </div>
           <div className="flex gap-10">

@@ -3,7 +3,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 // 1. Haversine formula to calculate accurate distance in meters
 const calculateDistance = (lat1, lon1, lat2, lon2) => {
   const R = 6371e3; // Earth radius in meters
-  const toRadians = degrees => (degrees * Math.PI) / 180;
+  const toRadians = (degrees) => (degrees * Math.PI) / 180;
   
   const dLat = toRadians(lat2 - lat1);
   const dLon = toRadians(lon2 - lon1);
@@ -17,10 +17,10 @@ const calculateDistance = (lat1, lon1, lat2, lon2) => {
   return R * c; // Distance in meters
 };
 
-// 4. Calculate heading from previously known point to current point in degrees
+// 7. Calculate heading from previously known point to current point in degrees
 const calculateHeading = (lat1, lon1, lat2, lon2) => {
-  const toRadians = degrees => (degrees * Math.PI) / 180;
-  const toDegrees = radians => (radians * 180) / Math.PI;
+  const toRadians = (degrees) => (degrees * Math.PI) / 180;
+  const toDegrees = (radians) => (radians * 180) / Math.PI;
   
   const phi1 = toRadians(lat1);
   const phi2 = toRadians(lat2);
@@ -30,8 +30,7 @@ const calculateHeading = (lat1, lon1, lat2, lon2) => {
   const x = Math.cos(phi1) * Math.sin(phi2) -
             Math.sin(phi1) * Math.cos(phi2) * Math.cos(deltaLambda);
             
-  const heading = (toDegrees(Math.atan2(y, x)) + 360) % 360;
-  return heading;
+  return (toDegrees(Math.atan2(y, x)) + 360) % 360;
 };
 
 export function useGeolocation(onUpdate, onError, options = {}) {
@@ -39,30 +38,37 @@ export function useGeolocation(onUpdate, onError, options = {}) {
     enableHighAccuracy = true,
     timeout = 10000,
     maximumAge = 0,
-    accuracyThreshold = 2000, // Relaxed to 2000m to allow location on desktop and indoors
-    noiseThreshold = 2,       // Relaxed to 2m for more sensitive responsiveness
-    throttleMs = 2000,      // 7. Update every 2 seconds max
+    accuracyThreshold = 100, // 4. Set accurate threshold 50-100m for proper GPS rejection
+    noiseThreshold = 5,      
+    throttleMs = 2000,       
     cacheKey = 'speedcam_location_cache',
-    enableCaching = true,   // 10. Optional localStorage caching
-    fallbackFetchInterval = 60000 // If using network fallback, fetch interval
+    enableCaching = true,
+    fallbackFetchInterval = 60000, 
+    maxSpeedKmh = 120,       // 1. Ignore calculates > 120km/h (prevents jump spikes)
+    maxJumpDistance = 200,   // 2. Ignore single update distance jump > 200m
+    cacheMaxAgeMs = 5 * 60 * 1000 // 5. 5-minute cache expiration
   } = options;
 
   const [myLoc, setMyLoc] = useState(null);
   const [speed, setSpeed] = useState(0);
   const [heading, setHeading] = useState(0);
 
-  // 8. Maintain previous position using refs
+  // 10. Optimized refs strictly maintaining prior state correctly
   const prevLocationRef = useRef(null);
+  const lastValidGpsRef = useRef(null);
   const lastUpdateTimeRef = useRef(0);
   const watchIdRef = useRef(null);
   const isUsingFallbackRef = useRef(false);
   
-  const KMH_CONVERSION = 3.6; // m/s to km/h
+  // 6. Ref used exclusively for smoothing moving averages
+  const speedHistoryRef = useRef([]);
+  const KMH_CONVERSION = 3.6; 
 
-  // 2. Implement fallback using network-based location
   const fetchNetworkLocation = useCallback(async () => {
+    // 8. Prevent interference: Only attempt network location if the fallback flag is active
+    if (!isUsingFallbackRef.current) return;
+
     try {
-      // Free network IP location fetch
       const response = await fetch('https://ipapi.co/json/');
       if (!response.ok) throw new Error('Network response was not ok');
       const data = await response.json();
@@ -71,14 +77,22 @@ export function useGeolocation(onUpdate, onError, options = {}) {
       const newLat = parseFloat(data.latitude);
       const newLon = parseFloat(data.longitude);
       
+      // 3. Network fallback hardening: Ignore if it varies insanely from last known good GPS
+      if (lastValidGpsRef.current) {
+         const distFromGps = calculateDistance(lastValidGpsRef.current.latitude, lastValidGpsRef.current.longitude, newLat, newLon);
+         if (distFromGps > 1000) {
+            console.warn(`[Geo] Ignored Network IP Fallback. Differed by ${distFromGps.toFixed(0)}m from last valid GPS.`);
+            return;
+         }
+      }
+
       processNewLocation({
         latitude: newLat,
         longitude: newLon,
-        accuracy: 1000, // Network location accuracy is typically low
+        accuracy: 1000, 
         timestamp: now,
         source: 'network'
       });
-      
     } catch (err) {
       if (onError) onError('Network fallback failed: ' + err.message, 'NETWORK_ERROR');
     }
@@ -88,85 +102,111 @@ export function useGeolocation(onUpdate, onError, options = {}) {
     const { latitude, longitude, accuracy, timestamp, source } = newRawLocation;
     const now = Date.now();
     
-    // 5. Implement accuracy filtering
-    if (accuracy > accuracyThreshold && source !== 'network') {
-      console.warn(`[Geo] Skipped update due to poor accuracy: ${Math.round(accuracy)}m (Threshold: ${accuracyThreshold}m). Go outdoors or use a real GPS device.`);
+    // 4. Tight accuracy filtering (GPS must be better than X meters)
+    if (accuracy > accuracyThreshold && source !== 'network' && source !== 'cache') {
+      console.warn(`[Geo] Ignored GPS Update due to bad accuracy: ${Math.round(accuracy)}m (Threshold: ${accuracyThreshold}m)`);
       return; 
     }
     
-    // 7. Add throttling
-    if (now - lastUpdateTimeRef.current < throttleMs) {
+    // Throttle block (bypass throttle for cache loader)
+    if (now - lastUpdateTimeRef.current < throttleMs && source !== 'cache') {
       return; 
     }
 
     const prevLoc = prevLocationRef.current;
     let distance = 0;
-    let calculatedSpeedKmh = 0;
-    let calculatedHeading = 0;
-
+    let currentSpeedKmh = 0;
+    let currentHeading = heading; // Persistent valid heading logic
+    
     if (prevLoc) {
       distance = calculateDistance(prevLoc.latitude, prevLoc.longitude, latitude, longitude);
       
-      // 6. Implement noise filtering
       if (distance < noiseThreshold) {
         return; 
       }
       
-      // 3. Add manual speed calculation
+      // 2. Max distance jump filter (Blocks gigantic phantom leaps)
+      if (distance > maxJumpDistance && source !== 'network' && source !== 'cache') {
+         console.warn(`[Geo] Ignored GPS Update: Teleportation distance jump spike of ${Math.round(distance)}m > ${maxJumpDistance}m`);
+         return;
+      }
+      
+      // 6. Stable speed calculations
       const timeDiffSeconds = (timestamp - prevLoc.timestamp) / 1000;
       if (timeDiffSeconds > 0) {
         const speedMs = distance / timeDiffSeconds;
-        calculatedSpeedKmh = Math.round(speedMs * KMH_CONVERSION);
+        currentSpeedKmh = speedMs * KMH_CONVERSION;
+        
+        // 1. Max Fake-Speed filter (Blocks jumps creating 500km/h speeds)
+        if (currentSpeedKmh > maxSpeedKmh) {
+           console.warn(`[Geo] Ignored GPS Update: Calculation created fake speed spike of ${Math.round(currentSpeedKmh)} km/h.`);
+           return;
+        }
       }
       
-      // 4. Add manual heading calculation
-      calculatedHeading = Math.round(calculateHeading(prevLoc.latitude, prevLoc.longitude, latitude, longitude));
+      // 7. Ensure heading is calculated only when significant clean movement is passed 
+      if (distance >= noiseThreshold) {
+         currentHeading = Math.round(calculateHeading(prevLoc.latitude, prevLoc.longitude, latitude, longitude));
+      }
     }
+
+    // 6. Smoothing logic (average out the last 3 valid calculations to completely remove sharp spikes)
+    speedHistoryRef.current.push(currentSpeedKmh);
+    if (speedHistoryRef.current.length > 3) speedHistoryRef.current.shift();
+    const smoothedSpeedKmh = Math.round(speedHistoryRef.current.reduce((a, b) => a + b, 0) / speedHistoryRef.current.length);
 
     const newLocationData = {
       latitude,
       longitude,
-      speed: calculatedSpeedKmh,
-      heading: calculatedHeading,
+      speed: smoothedSpeedKmh,
+      heading: currentHeading,
       accuracy,
       timestamp,
       source
     };
 
-    // 8. Maintain previous position
+    // Keep memory of the last true valid GPS
+    if (source === 'gps') {
+       lastValidGpsRef.current = newLocationData;
+    }
+
+    // 8. Maintain progression
     prevLocationRef.current = newLocationData;
     lastUpdateTimeRef.current = now;
 
     setMyLoc([latitude, longitude]);
-    setSpeed(calculatedSpeedKmh);
-    setHeading(calculatedHeading);
+    setSpeed(smoothedSpeedKmh);
+    setHeading(currentHeading);
 
-    // 9. Provide callback with lat, lon, speed, heading, and prev position
-    if (onUpdate) {
+    if (onUpdate && source !== 'cache') {
       onUpdate({
         latitude,
         longitude,
-        speed: calculatedSpeedKmh,
-        heading: calculatedHeading,
+        speed: smoothedSpeedKmh,
+        heading: currentHeading,
         prevPos: prevLoc ? [prevLoc.latitude, prevLoc.longitude] : null
       });
     }
 
-    // 10. Add localStorage caching when significant location change occurs
-    if (enableCaching) {
+    if (enableCaching && source !== 'cache') {
       try {
         localStorage.setItem(cacheKey, JSON.stringify(newLocationData));
       } catch (err) {
         console.warn('Failed to cache location', err);
       }
     }
-  }, [accuracyThreshold, noiseThreshold, throttleMs, onUpdate, enableCaching, cacheKey]);
+  }, [accuracyThreshold, noiseThreshold, throttleMs, maxJumpDistance, maxSpeedKmh, heading, onUpdate, enableCaching, cacheKey]);
 
   useEffect(() => {
     let fallbackIntervalId;
 
     const handleGeolocationSuccess = (position) => {
-      isUsingFallbackRef.current = false;
+      // 8. Clean separation check: if we got GPS signal, completely disable the fallback mechanism
+      if (isUsingFallbackRef.current) {
+         isUsingFallbackRef.current = false;
+         if (fallbackIntervalId) clearInterval(fallbackIntervalId);
+      }
+
       const { latitude, longitude, accuracy } = position.coords;
       const timestamp = position.timestamp || Date.now();
       
@@ -180,14 +220,13 @@ export function useGeolocation(onUpdate, onError, options = {}) {
     };
 
     const handleGeolocationError = (error) => {
-      // 2. Implement fallback using network-based location
+      // 8. Trigger fallback only when actual explicit consistent failure occurs
       if (!isUsingFallbackRef.current) {
         isUsingFallbackRef.current = true;
         fetchNetworkLocation();
         fallbackIntervalId = setInterval(fetchNetworkLocation, fallbackFetchInterval);
       }
       
-      // 11. Ensure proper error handling and permission handling
       let errorMsg = 'Unknown location error';
       switch (error.code) {
         case error.PERMISSION_DENIED:
@@ -203,7 +242,6 @@ export function useGeolocation(onUpdate, onError, options = {}) {
       if (onError) onError(errorMsg, error.code);
     };
 
-    // 1. Use browser Geolocation API as primary source
     if ('geolocation' in navigator) {
       watchIdRef.current = navigator.geolocation.watchPosition(
         handleGeolocationSuccess,
@@ -227,24 +265,33 @@ export function useGeolocation(onUpdate, onError, options = {}) {
     };
   }, [enableHighAccuracy, timeout, maximumAge, fetchNetworkLocation, processNewLocation, fallbackFetchInterval, onError]);
 
-  // Load from cache initially
   useEffect(() => {
     if (enableCaching) {
       try {
         const cached = localStorage.getItem(cacheKey);
         if (cached) {
           const parsedCache = JSON.parse(cached);
-          if (parsedCache && !prevLocationRef.current) {
-            prevLocationRef.current = parsedCache;
-            // Provide a fast cold-start location based on stored data
-            setMyLoc([parsedCache.latitude, parsedCache.longitude]);
+          
+          // 5. Expiry Logic verification
+          if (parsedCache && parsedCache.timestamp) {
+             const ageInMs = Date.now() - parsedCache.timestamp;
+             
+             if (ageInMs <= cacheMaxAgeMs) {
+                if (!prevLocationRef.current) {
+                   parsedCache.source = 'cache';
+                   processNewLocation(parsedCache);
+                }
+             } else {
+                console.warn(`[Geo] Ignored Cache: Older than 5 minutes (Age: ${Math.round(ageInMs / 60000)} mins)`);
+                localStorage.removeItem(cacheKey);
+             }
           }
         }
       } catch (e) {
-        console.warn('Failed to load initial location from cache', e);
+        console.warn('Failed to load initial cache', e);
       }
     }
-  }, [cacheKey, enableCaching]);
+  }, [cacheKey, enableCaching, cacheMaxAgeMs, processNewLocation]);
 
   return { myLoc, speed, heading };
 }

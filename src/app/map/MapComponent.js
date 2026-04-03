@@ -231,6 +231,7 @@ export default function SpeedcamHUD() {
     }
 
     try {
+      if (!myLoc) throw new Error('Wait for GPS signal before routing');
       const routeRes = await fetch(`https://api.openrouteservice.org/v2/directions/driving-car?api_key=${KEY}&start=${myLoc[1]},${myLoc[0]}&end=${lng},${lat}`);
       if (!routeRes.ok) throw new Error('Routing failed');
       const routeData = await routeRes.json();
@@ -327,6 +328,7 @@ export default function SpeedcamHUD() {
   }, [sheetHeight]);
 
   const nextCam = useMemo(() => {
+    if (!myLoc) return null;
     return allCameras
       .map(c => ({ ...c, d: getDist(myLoc[0], myLoc[1], c.lat, c.lng) }))
       .filter(c => !crossedSet.current.has(c.id) && c.d < 3000)
@@ -549,7 +551,7 @@ export default function SpeedcamHUD() {
           {!is3DActive ? (
             <Map2D 
               key={`${displayCameras.length}_${theme}_${isLocked}`}
-              coords={myLoc} 
+              coords={myLoc || [18.5204, 73.8567]} 
               zoom={speed > 80 ? 14 : 17} 
               theme={theme} 
               cameras={displayCameras} 
@@ -572,7 +574,7 @@ export default function SpeedcamHUD() {
             />
           ) : (
             <Mappa3D 
-              coords={myLoc} 
+              coords={myLoc || [18.5204, 73.8567]} 
               zoom={17} 
               theme={theme} 
               cameras={displayCameras} 
@@ -808,8 +810,8 @@ export default function SpeedcamHUD() {
           )}
           <div className="h-2 w-px bg-white/10 hidden sm:block" />
           <div className="items-center gap-1.5 hidden sm:flex">
-             <LocateFixed size={10} className={myLoc[0] !== 18.5204 ? 'text-emerald-500' : 'text-orange-500 animate-bounce'} />
-             <span className="text-zinc-400">GPS: {myLoc[0].toFixed(2)},{myLoc[1].toFixed(2)}</span>
+             <LocateFixed size={10} className={myLoc ? 'text-emerald-500' : 'text-orange-500 animate-bounce'} />
+             <span className="text-zinc-400">GPS: {myLoc ? `${myLoc[0].toFixed(2)},${myLoc[1].toFixed(2)}` : 'Wait...'}</span>
           </div>
           <div className="h-2 w-px bg-white/10 ml-1" />
           <div className="flex items-center gap-1.5 ml-1">
